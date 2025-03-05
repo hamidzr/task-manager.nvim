@@ -1,4 +1,4 @@
--- task-manager.lua: A Neovim plugin for managing todo priorities and categories
+-- task-manager.nvim: A Neovim plugin for managing todo priorities and categories
 -- Author: AHZ
 -- Description: Allows interactive prioritization of todo items and reassignment between categories
 
@@ -45,7 +45,7 @@ function M.setup(user_config)
   vim.api.nvim_set_keymap(
     'v',
     leader .. M.config.keybindings.prioritize_all,
-    ':<C-u>lua require("todo-priority").prioritize_selected(false)<CR>',
+    ':<C-u>lua require("task-manager").prioritize_selected(false)<CR>',
     { noremap = true, silent = true, desc = "Prioritize all selected todo items" }
   )
 
@@ -53,7 +53,7 @@ function M.setup(user_config)
   vim.api.nvim_set_keymap(
     'v',
     leader .. M.config.keybindings.prioritize_new,
-    ':<C-u>lua require("todo-priority").prioritize_selected(true)<CR>',
+    ':<C-u>lua require("task-manager").prioritize_selected(true)<CR>',
     { noremap = true, silent = true, desc = "Prioritize only new todo items" }
   )
 
@@ -61,7 +61,7 @@ function M.setup(user_config)
   vim.api.nvim_set_keymap(
     'v',
     leader .. M.config.keybindings.sort_by_priority,
-    ':<C-u>lua require("todo-priority").sort_by_priority()<CR>',
+    ':<C-u>lua require("task-manager").sort_by_priority()<CR>',
     { noremap = true, silent = true, desc = "Sort todo items by priority" }
   )
 end
@@ -449,17 +449,46 @@ function M.sort_by_priority()
       end
 
       -- Sort the rest by priority (stable sort)
-      table.sort(block.lines, function(a, b)
-        local priority_a = M.get_priority(a) or 999 -- Unprioritized items go last
-        local priority_b = M.get_priority(b) or 999
+      -- We'll use a stable sort implementation to preserve original order
+      -- First, tag each line with its original position
+      local tagged_lines = {}
+      for i, line in ipairs(block.lines) do
+        tagged_lines[i] = {
+          line = line,
+          original_pos = i,
+          priority = M.get_priority(line)
+        }
+      end
 
-        if priority_a == priority_b then
-          -- For equal priorities, maintain original order (stable sort)
+      -- Perform the stable sort
+      table.sort(tagged_lines, function(a, b)
+        -- Both have priorities
+        if a.priority and b.priority then
+          if a.priority ~= b.priority then
+            return a.priority < b.priority
+          end
+          -- Same priority - maintain original order
+          return a.original_pos < b.original_pos
+        end
+
+        -- Only a has priority
+        if a.priority and not b.priority then
+          return true
+        end
+
+        -- Only b has priority
+        if not a.priority and b.priority then
           return false
         end
 
-        return priority_a < priority_b
+        -- Neither has priority - maintain original order
+        return a.original_pos < b.original_pos
       end)
+
+      -- Extract the sorted lines
+      for i, tagged_line in ipairs(tagged_lines) do
+        block.lines[i] = tagged_line.line
+      end
 
       -- Put the heading back
       if heading then

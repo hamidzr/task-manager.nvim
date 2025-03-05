@@ -35,6 +35,21 @@ Then add to your init.vim or init.lua:
 require('todo-priority').setup()
 ```
 
+Lazy Lua for neovim:
+
+```lua
+  {
+    'hamidzr/task-manager.nvim',
+    name='task-manager',
+    config = function()
+      require('task-manager').setup({
+        -- Optional: customize settings here
+        debug = true,  -- Enable debug mode during development
+      })
+    end
+  },
+```
+
 ## Configuration
 
 The plugin works with default settings, but you can customize it:
