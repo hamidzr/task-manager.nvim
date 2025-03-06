@@ -261,6 +261,13 @@ function M.move_to_category(line, line_num, source_category, target_category)
   -- Calculate how many lines we need to remove
   local total_lines = 1 + #sub_items
 
+  -- Store the original lines exactly as they are before removal
+  local original_line = line
+  local original_sub_items = {}
+  for _, sub_item in ipairs(sub_items) do
+    table.insert(original_sub_items, sub_item.content)
+  end
+
   -- Delete the line and its sub-items from their current position
   vim.api.nvim_buf_set_lines(0, line_num-1, line_num-1+total_lines, true, {})
 
@@ -277,10 +284,10 @@ function M.move_to_category(line, line_num, source_category, target_category)
 
   target_end = target_end or #buffer_lines + 1
 
-  -- Prepare all lines to insert (parent line + sub-items)
-  local lines_to_insert = {line}
-  for _, sub_item in ipairs(sub_items) do
-    table.insert(lines_to_insert, sub_item.content)
+  -- Prepare all lines to insert (parent line + sub-items) - use exact original content
+  local lines_to_insert = {original_line}
+  for _, content in ipairs(original_sub_items) do
+    table.insert(lines_to_insert, content)
   end
 
   -- Insert the lines at the end of the target category
@@ -399,9 +406,6 @@ function M.prioritize_selected(skip_prioritized)
 
       local char = vim.fn.getchar()
       local input = char == 27 and "q" or vim.fn.nr2char(char)
-
-      -- Clear visual selection
-      vim.cmd("normal! <Esc>")
 
       -- Process input
       if input == "q" then
