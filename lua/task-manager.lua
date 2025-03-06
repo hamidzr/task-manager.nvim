@@ -158,6 +158,26 @@ end
 
 -- Generate a single-letter shortcut for a category name
 function M.generate_category_shortcut(category_name, used_shortcuts)
+  -- Define reserved shortcuts that should not be used for categories
+  local reserved_shortcuts = {
+    s = true, -- Skip
+    q = true, -- Quit
+    ["1"] = true,
+    ["2"] = true,
+    ["3"] = true,
+    ["4"] = true,
+    ["5"] = true,
+    ["6"] = true,
+    ["7"] = true,
+    ["8"] = true,
+    ["9"] = true -- Priorities
+  }
+
+  -- Add reserved shortcuts to used_shortcuts
+  for key in pairs(reserved_shortcuts) do
+    used_shortcuts[key] = true
+  end
+
   -- Try first letter of each word
   local words = {}
   for word in category_name:gmatch("%S+") do
@@ -183,13 +203,13 @@ function M.generate_category_shortcut(category_name, used_shortcuts)
   -- Last resort: just use the next available letter
   for c = 97, 122 do -- ASCII 'a' to 'z'
     local char = string.char(c)
-    if not used_shortcuts[char] then
+    if not used_shortcuts[char] and not reserved_shortcuts[char] then
       return char
     end
   end
 
-  -- If all fails, use a number
-  for i = 1, 9 do
+  -- If all fails, use a non-reserved number
+  for i = 0, 0 do -- Only try 0, as 1-9 are reserved for priorities
     local char = tostring(i)
     if not used_shortcuts[char] then
       return char
@@ -332,12 +352,14 @@ function M.display_category_shortcuts(categories)
     table.insert(msg, { cat.name .. "\n", "Normal" })
   end
 
-  -- Add instruction for numbers
+  -- Add instruction for numbers, shortcuts, skipping, and quitting
   table.insert(msg, { "\nUse ", "Normal" })
   table.insert(msg, { "1-9", "Question" })
   table.insert(msg, { " for priorities, ", "Normal" })
   table.insert(msg, { "letter shortcuts", "Question" })
-  table.insert(msg, { " to move between categories, or ", "Normal" })
+  table.insert(msg, { " to move between categories, ", "Normal" })
+  table.insert(msg, { "s", "Question" })
+  table.insert(msg, { " to skip, or ", "Normal" })
   table.insert(msg, { "q", "Question" })
   table.insert(msg, { " to quit.\n", "Normal" })
 
@@ -421,6 +443,11 @@ function M.prioritize_selected(skip_prioritized)
       -- Process input
       if input == "q" then
         break
+      elseif input == "s" then
+        -- Skip this item (do nothing and move to next)
+        vim.api.nvim_echo({
+          { "Skipped", "Normal" }
+        }, true, {})
       elseif input:match("[1-9]") then
         -- Assign priority
         local priority = tonumber(input)
