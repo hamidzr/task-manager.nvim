@@ -75,41 +75,64 @@ end
 -- Extract the list marker from the beginning of a line (if any)
 function M.get_list_marker(line)
   -- Match common list markers like "- ", "* ", "1. ", etc.
+  local indent = line:match("^(%s*)")
+
+  -- Match bullet list markers
   local marker = line:match("^%s*([%-%*%+]%s+)")
   if marker then
-    return marker
+    return indent, marker
   end
 
   -- Match numbered lists
-  marker = line:match("^%s*(%d+%.%s+)")
-  if marker then
-    return marker
+  local num_marker = line:match("^%s*(%d+%.%s+)")
+  if num_marker then
+    return indent, num_marker
   end
 
-  return ""
+  -- Return just the indentation if no marker found
+  return indent, ""
+end
+
+-- Check if a line is indented (potential sub-item)
+function M.is_sub_item(line)
+  local indent = line:match("^(%s+)")
+  return indent and #indent >= 2
 end
 
 -- Extract the content of a line without list marker and priority
 function M.get_content(line)
-  -- Remove list marker
-  local content = line:gsub("^%s*[%-%*%+]%s+", "")
-  content = content:gsub("^%s*%d+%.%s+", "")
+  -- Get the indentation
+  local indent = line:match("^(%s*)")
+
+  -- Remove list marker while preserving indentation
+  local content = line:gsub("^%s*[%-%*%+]%s+", indent)
+  content = content:gsub("^%s*%d+%.%s+", indent)
 
   -- Remove priority tag if it exists
   content = content:gsub("%s*%[p%d+%]%s*", " ")
 
-  -- Trim leading/trailing whitespace
-  content = content:gsub("^%s*(.-)%s*$", "%1")
+  -- Trim trailing whitespace (but keep leading indentation)
+  content = content:gsub("^(%s*)%s*(.-)[%s]*$", "%1%2")
 
   return content
 end
 
 -- Format a line with the given priority
 function M.format_with_priority(line, priority)
-  local list_marker = M.get_list_marker(line)
-  local content = M.get_content(line)
+  -- Only add priority to non-sub-items
+  if not M.is_sub_item(line) then
+    local indent, marker = M.get_list_marker(line)
+    local content = M.get_content(line)
 
-  return string.format(M.config.priority_format, list_marker, priority, content)
+    if marker ~= "" then
+      -- Format with priority and preserve exact formatting
+      local formatted = string.format(M.config.priority_format, indent .. marker, priority, content)
+      return formatted
+    end
+  end
+
+  -- For sub-items or non-list items, just return the original line
+  return line
 end
 
 -- Check if a line is a category heading
@@ -201,10 +224,45 @@ function M.find_line_category(line_num, categories)
   return nil  -- Line is before any category
 end
 
--- Move a line from one category to another
+-- Find sub-items for a given parent item
+function M.find_sub_items(parent_line_num)
+  local sub_items = {}
+  local buffer_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  local parent_line = buffer_lines[parent_line_num]
+  local parent_indent = M.get_indent_level(parent_line)
+
+  -- Collect lines after the parent that are more indented
+  local i = parent_line_num + 1
+  while i <= #buffer_lines do
+    local line = buffer_lines[i]
+    local indent = M.get_indent_level(line)
+
+    -- If we find a line with less or equal indentation, we're done
+    if indent <= parent_indent then
+      break
+    end
+
+    -- Add the sub-item exactly as is
+    table.insert(sub_items, {
+      content = line,
+      line_num = i
+    })
+    i = i + 1
+  end
+
+  return sub_items
+end
+
+-- Move a line and its sub-items from one category to another
 function M.move_to_category(line, line_num, source_category, target_category)
-  -- Delete the line from its current position
-  vim.api.nvim_buf_set_lines(0, line_num-1, line_num, true, {})
+  -- Find any sub-items that should be moved with this line
+  local sub_items = M.find_sub_items(line_num)
+
+  -- Calculate how many lines we need to remove
+  local total_lines = 1 + #sub_items
+
+  -- Delete the line and its sub-items from their current position
+  vim.api.nvim_buf_set_lines(0, line_num-1, line_num-1+total_lines, true, {})
 
   -- Find the end of the target category
   local target_end = nil
@@ -219,10 +277,16 @@ function M.move_to_category(line, line_num, source_category, target_category)
 
   target_end = target_end or #buffer_lines + 1
 
-  -- Insert the line at the end of the target category
-  vim.api.nvim_buf_set_lines(0, target_end-1, target_end-1, true, {line})
+  -- Prepare all lines to insert (parent line + sub-items)
+  local lines_to_insert = {line}
+  for _, sub_item in ipairs(sub_items) do
+    table.insert(lines_to_insert, sub_item.content)
+  end
 
-  -- Return the new line number
+  -- Insert the lines at the end of the target category
+  vim.api.nvim_buf_set_lines(0, target_end-1, target_end-1, true, lines_to_insert)
+
+  -- Return the new line number of the parent item
   return target_end-1
 end
 
@@ -301,8 +365,8 @@ function M.prioritize_selected(skip_prioritized)
     local line = line_data.content
     local line_num = line_data.line_num
 
-    -- Skip category headings
-    if M.is_category_heading(line) then
+    -- Skip category headings and sub-items
+    if M.is_category_heading(line) or M.is_sub_item(line) then
       i = i + 1
       goto continue
     end
@@ -448,47 +512,76 @@ function M.sort_by_priority()
         heading = table.remove(block.lines, 1)
       end
 
-      -- Sort the rest by priority (stable sort)
-      -- We'll use a stable sort implementation to preserve original order
-      -- First, tag each line with its original position
-      local tagged_lines = {}
-      for i, line in ipairs(block.lines) do
-        tagged_lines[i] = {
-          line = line,
-          original_pos = i,
-          priority = M.get_priority(line)
-        }
+      -- Group parent items with their sub-items
+      local item_groups = {}
+      local i = 1
+
+      while i <= #block.lines do
+        local line = block.lines[i]
+        local is_heading = M.is_category_heading(line)
+        local is_sub = M.is_sub_item(line)
+
+        if is_heading or is_sub then
+          -- Skip headings and sub-items (we handle them as part of parent items)
+          i = i + 1
+        else
+          -- This is a parent item - find all its sub-items
+          local group = {
+            parent = {
+              line = line,
+              priority = M.get_priority(line),
+              original_pos = i
+            },
+            sub_items = {}
+          }
+
+          -- Collect sub-items
+          local j = i + 1
+          while j <= #block.lines and M.is_sub_item(block.lines[j]) do
+            table.insert(group.sub_items, block.lines[j])
+            j = j + 1
+          end
+
+          table.insert(item_groups, group)
+          i = j  -- Skip past the sub-items
+        end
       end
 
-      -- Perform the stable sort
-      table.sort(tagged_lines, function(a, b)
+      -- Sort the groups by parent priority (stable sort)
+      table.sort(item_groups, function(a, b)
         -- Both have priorities
-        if a.priority and b.priority then
-          if a.priority ~= b.priority then
-            return a.priority < b.priority
+        if a.parent.priority and b.parent.priority then
+          if a.parent.priority ~= b.parent.priority then
+            return a.parent.priority < b.parent.priority
           end
           -- Same priority - maintain original order
-          return a.original_pos < b.original_pos
+          return a.parent.original_pos < b.parent.original_pos
         end
 
         -- Only a has priority
-        if a.priority and not b.priority then
+        if a.parent.priority and not b.parent.priority then
           return true
         end
 
         -- Only b has priority
-        if not a.priority and b.priority then
+        if not a.parent.priority and b.parent.priority then
           return false
         end
 
         -- Neither has priority - maintain original order
-        return a.original_pos < b.original_pos
+        return a.parent.original_pos < b.parent.original_pos
       end)
 
-      -- Extract the sorted lines
-      for i, tagged_line in ipairs(tagged_lines) do
-        block.lines[i] = tagged_line.line
+      -- Flatten the sorted groups back into lines
+      local sorted_lines = {}
+      for _, group in ipairs(item_groups) do
+        table.insert(sorted_lines, group.parent.line)
+        for _, sub_item in ipairs(group.sub_items) do
+          table.insert(sorted_lines, sub_item)
+        end
       end
+
+      block.lines = sorted_lines
 
       -- Put the heading back
       if heading then
