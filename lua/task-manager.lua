@@ -84,7 +84,7 @@ end
 -- Extract the list marker from the beginning of a line (if any)
 function M.get_list_marker(line)
   -- Match common list markers like "- ", "* ", "1. ", etc.
-  local indent = M.get_indent_level(line)
+  local indent = line:match("^(%s*)")
 
   -- Match bullet list markers
   local marker = line:match("^%s*([%-%*%+]%s+)")
@@ -104,13 +104,14 @@ end
 
 -- Check if a line is indented (potential sub-item)
 function M.is_sub_item(line)
-  return M.get_indent_level(line) > 0
+  local indent = line:match("^(%s+)")
+  return indent and #indent >= 2
 end
 
 -- Extract the content of a line without list marker and priority
 function M.get_content(line)
   -- Get the indentation
-  local indent = M.get_indent_level(line)
+  local indent = line:match("^(%s*)")
 
   -- Remove list marker while preserving indentation
   local content = line:gsub("^%s*[%-%*%+]%s+", indent)
