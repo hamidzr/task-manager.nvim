@@ -132,6 +132,8 @@ function M.format_with_priority(line, priority)
   if not M.is_sub_item(line) then
     local indent, marker = M.get_list_marker(line)
     local content = M.get_content(line)
+    -- Strip trailing spaces from the marker to avoid duplicated spaces in the final format
+    marker = marker:gsub("%s+$", "")
 
     if marker ~= "" then
       -- Format with priority and preserve exact formatting
