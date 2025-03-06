@@ -16,9 +16,10 @@ A Neovim plugin that helps manage, prioritize, and categorize to-do items in you
 
 ```lua
 use {
-  'your-username/todo-priority',
+  'hamidzr/task-manager.nvim',
+  name='task-manager',
   config = function()
-    require('todo-priority').setup()
+    require('task-manager').setup()
   end
 }
 ```
@@ -26,28 +27,28 @@ use {
 ### Using vim-plug
 
 ```vim
-Plug 'your-username/todo-priority'
+Plug 'hamidzr/task-manager'
 ```
 
 Then add to your init.vim or init.lua:
 
 ```lua
-require('todo-priority').setup()
+require('task-manager').setup()
 ```
 
 Lazy Lua for neovim:
 
 ```lua
-  {
-    'hamidzr/task-manager.nvim',
-    name='task-manager',
-    config = function()
-      require('task-manager').setup({
-        -- Optional: customize settings here
-        debug = true,  -- Enable debug mode during development
-      })
-    end
-  },
+{
+  'hamidzr/task-manager.nvim.nvim',
+  name='task-manager',
+  config = function()
+    require('task-manager').setup({
+      -- Optional: customize settings here
+      debug = true,  -- Enable debug mode during development
+    })
+  end
+}
 ```
 
 ## Configuration
@@ -55,7 +56,7 @@ Lazy Lua for neovim:
 The plugin works with default settings, but you can customize it:
 
 ```lua
-require('todo-priority').setup({
+require('task-manager').setup({
   -- Format for priority tags: [p1], [p2], etc.
   priority_format = "%s [p%d] %s",
 
@@ -151,7 +152,7 @@ After prioritization and category changes:
 Place the plugin in your Neovim configuration directory:
 
 ```
-~/.config/nvim/lua/todo-priority.lua
+~/.config/nvim/lua/task-manager.lua
 ```
 
 Or if you're packaging it as a proper plugin:
@@ -159,7 +160,7 @@ Or if you're packaging it as a proper plugin:
 ```
 ~/.config/nvim/
 └── lua/
-    └── todo-priority/
+    └── task-manager/
         ├── init.lua
         └── README.md
 ```
