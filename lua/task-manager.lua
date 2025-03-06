@@ -12,9 +12,9 @@ M.config = {
   priority_pattern = "%[p(%d+)%]",
   -- Keybindings (without leader, which is added by setup)
   keybindings = {
-    prioritize_all = "ta",      -- (t)odo (a)ll prioritize
-    prioritize_new = "tn",      -- (t)odo (n)ew prioritize
-    sort_by_priority = "ts",    -- (t)odo (s)ort
+    prioritize_all = "ta",   -- (t)odo (a)ll prioritize
+    prioritize_new = "tn",   -- (t)odo (n)ew prioritize
+    sort_by_priority = "ts", -- (t)odo (s)ort
   },
   -- Category heading pattern (Markdown h2)
   category_pattern = "^%s*##%s+(.+)$",
@@ -31,7 +31,7 @@ end
 
 function M.get_indent_level(line)
   if not line then
-    return 0  -- Return 0 for nil lines to avoid errors
+    return 0 -- Return 0 for nil lines to avoid errors
   end
 
   local indent = line:match("^(%s*)")
@@ -193,7 +193,7 @@ function M.generate_category_shortcut(category_name, used_shortcuts)
     end
   end
 
-  return "?"  -- Should never happen unless you have more than 35 categories
+  return "?" -- Should never happen unless you have more than 35 categories
 end
 
 -- Get all categories from the entire buffer
@@ -229,7 +229,7 @@ function M.find_line_category(line_num, categories)
     end
   end
 
-  return nil  -- Line is before any category
+  return nil -- Line is before any category
 end
 
 -- Find sub-items for a given parent item
@@ -277,7 +277,7 @@ function M.move_to_category(line, line_num, source_category, target_category)
   end
 
   -- Delete the line and its sub-items from their current position
-  vim.api.nvim_buf_set_lines(0, line_num-1, line_num-1+total_lines, true, {})
+  vim.api.nvim_buf_set_lines(0, line_num - 1, line_num - 1 + total_lines, true, {})
 
   -- Find the end of the target category
   local target_end = nil
@@ -293,16 +293,16 @@ function M.move_to_category(line, line_num, source_category, target_category)
   target_end = target_end or #buffer_lines + 1
 
   -- Prepare all lines to insert (parent line + sub-items) - use exact original content
-  local lines_to_insert = {original_line}
+  local lines_to_insert = { original_line }
   for _, content in ipairs(original_sub_items) do
     table.insert(lines_to_insert, content)
   end
 
   -- Insert the lines at the end of the target category
-  vim.api.nvim_buf_set_lines(0, target_end-1, target_end-1, true, lines_to_insert)
+  vim.api.nvim_buf_set_lines(0, target_end - 1, target_end - 1, true, lines_to_insert)
 
   -- Return the new line number of the parent item
-  return target_end-1
+  return target_end - 1
 end
 
 -- Display a formatted table of categories and their shortcuts
@@ -314,29 +314,29 @@ function M.display_category_shortcuts(categories)
   end
 
   -- Build the message
-  local msg = {{"Category Shortcuts:\n", "Title"}}
+  local msg = { { "Category Shortcuts:\n", "Title" } }
 
   -- Add headers
-  table.insert(msg, {"Key", "Special"})
-  table.insert(msg, {" | ", "Normal"})
-  table.insert(msg, {"Category", "Special"})
-  table.insert(msg, {"\n" .. string.rep("-", 15 + max_length) .. "\n", "Normal"})
+  table.insert(msg, { "Key", "Special" })
+  table.insert(msg, { " | ", "Normal" })
+  table.insert(msg, { "Category", "Special" })
+  table.insert(msg, { "\n" .. string.rep("-", 15 + max_length) .. "\n", "Normal" })
 
   -- Add each category with its shortcut
   for _, cat in ipairs(categories) do
-    table.insert(msg, {" " .. cat.shortcut .. " ", "Question"})
-    table.insert(msg, {" | ", "Normal"})
-    table.insert(msg, {cat.name .. "\n", "Normal"})
+    table.insert(msg, { " " .. cat.shortcut .. " ", "Question" })
+    table.insert(msg, { " | ", "Normal" })
+    table.insert(msg, { cat.name .. "\n", "Normal" })
   end
 
   -- Add instruction for numbers
-  table.insert(msg, {"\nUse ", "Normal"})
-  table.insert(msg, {"1-9", "Question"})
-  table.insert(msg, {" for priorities, ", "Normal"})
-  table.insert(msg, {"letter shortcuts", "Question"})
-  table.insert(msg, {" to move between categories, or ", "Normal"})
-  table.insert(msg, {"q", "Question"})
-  table.insert(msg, {" to quit.\n", "Normal"})
+  table.insert(msg, { "\nUse ", "Normal" })
+  table.insert(msg, { "1-9", "Question" })
+  table.insert(msg, { " for priorities, ", "Normal" })
+  table.insert(msg, { "letter shortcuts", "Question" })
+  table.insert(msg, { " to move between categories, or ", "Normal" })
+  table.insert(msg, { "q", "Question" })
+  table.insert(msg, { " to quit.\n", "Normal" })
 
   -- Display the message
   vim.api.nvim_echo(msg, true, {})
@@ -347,7 +347,7 @@ function M.prioritize_selected(skip_prioritized)
   -- Get all categories
   local categories = M.get_all_categories()
   if #categories == 0 then
-    vim.api.nvim_echo({{"No categories found in the document", "ErrorMsg"}}, true, {})
+    vim.api.nvim_echo({ { "No categories found in the document", "ErrorMsg" } }, true, {})
     return
   end
 
@@ -397,7 +397,7 @@ function M.prioritize_selected(skip_prioritized)
       local saved_view = vim.fn.winsaveview()
 
       -- Highlight the current line
-      vim.api.nvim_win_set_cursor(0, {line_num, 0})
+      vim.api.nvim_win_set_cursor(0, { line_num, 0 })
       vim.cmd("normal! V")
 
       -- Prompt for priority or category change
@@ -408,8 +408,8 @@ function M.prioritize_selected(skip_prioritized)
       prompt = prompt .. ": "
 
       vim.api.nvim_echo({
-        {prompt, "Question"},
-        {line:gsub("^%s+", ""), "Normal"}
+        { prompt,                "Question" },
+        { line:gsub("^%s+", ""), "Normal" }
       }, true, {})
 
       local char = vim.fn.getchar()
@@ -422,7 +422,7 @@ function M.prioritize_selected(skip_prioritized)
         -- Assign priority
         local priority = tonumber(input)
         local new_line = M.format_with_priority(line, priority)
-        vim.api.nvim_buf_set_lines(0, line_num-1, line_num, true, {new_line})
+        vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, true, { new_line })
       elseif shortcut_map[input] then
         -- Move to another category
         local target_category = shortcut_map[input]
@@ -435,11 +435,11 @@ function M.prioritize_selected(skip_prioritized)
 
           -- Notify about the move
           vim.api.nvim_echo({
-            {string.format("Moved to %s", target_category.name), "Normal"}
+            { string.format("Moved to %s", target_category.name), "Normal" }
           }, true, {})
 
           -- Special handling: since we moved the line, we may need to adjust other line numbers
-          for j = i+1, #lines do
+          for j = i + 1, #lines do
             if lines[j].line_num > line_num then
               lines[j].line_num = lines[j].line_num - 1
             end
@@ -459,7 +459,7 @@ function M.prioritize_selected(skip_prioritized)
   end
 
   -- Notify the user that the operation is complete
-  vim.api.nvim_echo({{"Prioritization complete", "Normal"}}, true, {})
+  vim.api.nvim_echo({ { "Prioritization complete", "Normal" } }, true, {})
 end
 
 -- Sort selected lines by priority (stable sort within categories)
@@ -472,7 +472,7 @@ function M.sort_by_priority()
   local categories = M.get_all_categories()
 
   -- Get the lines in the selection
-  local lines = vim.api.nvim_buf_get_lines(0, start_line-1, end_line, true)
+  local lines = vim.api.nvim_buf_get_lines(0, start_line - 1, end_line, true)
 
   -- Identify contiguous blocks of lines within the same category
   local blocks = {}
@@ -492,7 +492,7 @@ function M.sort_by_priority()
       current_block = {
         category = current_category,
         start_line = i,
-        lines = {line}
+        lines = { line }
       }
     elseif current_block then
       -- Add line to the current block
@@ -505,7 +505,7 @@ function M.sort_by_priority()
       current_block = {
         category = category_name,
         start_line = i,
-        lines = {line}
+        lines = { line }
       }
     end
   end
@@ -555,7 +555,7 @@ function M.sort_by_priority()
           end
 
           table.insert(item_groups, group)
-          i = j  -- Skip past the sub-items
+          i = j -- Skip past the sub-items
         end
       end
 
@@ -611,10 +611,10 @@ function M.sort_by_priority()
   end
 
   -- Replace the lines in the buffer
-  vim.api.nvim_buf_set_lines(0, start_line-1, end_line, true, sorted_lines)
+  vim.api.nvim_buf_set_lines(0, start_line - 1, end_line, true, sorted_lines)
 
   -- Notify the user that the operation is complete
-  vim.api.nvim_echo({{"Sorting complete", "Normal"}}, true, {})
+  vim.api.nvim_echo({ { "Sorting complete", "Normal" } }, true, {})
 end
 
 return M
