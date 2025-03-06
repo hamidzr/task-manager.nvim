@@ -29,6 +29,15 @@ function M.debug_print(...)
   end
 end
 
+function M.get_indent_level(line)
+  if not line then
+    return 0  -- Return 0 for nil lines to avoid errors
+  end
+
+  local indent = line:match("^(%s*)")
+  return indent and #indent or 0
+end
+
 -- Set up the plugin with user config
 function M.setup(user_config)
   -- Merge user config with defaults
@@ -75,7 +84,7 @@ end
 -- Extract the list marker from the beginning of a line (if any)
 function M.get_list_marker(line)
   -- Match common list markers like "- ", "* ", "1. ", etc.
-  local indent = line:match("^(%s*)")
+  local indent = M.get_indent_level(line)
 
   -- Match bullet list markers
   local marker = line:match("^%s*([%-%*%+]%s+)")
@@ -95,14 +104,13 @@ end
 
 -- Check if a line is indented (potential sub-item)
 function M.is_sub_item(line)
-  local indent = line:match("^(%s+)")
-  return indent and #indent >= 2
+  return M.get_indent_level(line) > 0
 end
 
 -- Extract the content of a line without list marker and priority
 function M.get_content(line)
   -- Get the indentation
-  local indent = line:match("^(%s*)")
+  local indent = M.get_indent_level(line)
 
   -- Remove list marker while preserving indentation
   local content = line:gsub("^%s*[%-%*%+]%s+", indent)
