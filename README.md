@@ -86,11 +86,13 @@ The plugin expects your to-do list to be organized with Markdown headings as cat
 
 ```markdown
 ## Work
+
 - Fix bug in login form
 - [p1] Prepare for meeting
 - Update documentation
 
 ## Personal
+
 - [p3] Buy groceries
 - Call dentist
 ```
@@ -117,6 +119,7 @@ When you initiate prioritization:
 ### Category Shortcuts
 
 The plugin automatically generates single-letter shortcuts for each category, preferring:
+
 1. First letter of each word in the category name
 2. Other letters in the category name
 3. Any available letter if needed
@@ -126,23 +129,29 @@ These shortcuts are displayed when you start the prioritization process.
 ### Example
 
 Starting with:
+
 ```markdown
 ## Work
+
 - Fix bug in login form
 - [p1] Prepare for meeting
 
 ## Personal
+
 - Buy groceries
 - [p3] Call dentist
 ```
 
 After prioritization and category changes:
+
 ```markdown
 ## Work
+
 - [p1] Prepare for meeting
 - [p2] Fix bug in login form
 
 ## Personal
+
 - [p3] Call dentist
 - [p4] Buy groceries
 ```

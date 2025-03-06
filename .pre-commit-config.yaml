@@ -105,13 +105,13 @@ repos:
         args: [--fix, --config, site/eslint.config.js]
         files: \.(js|ts|svelte)$
         additional_dependencies:
-          - 'typescript-eslint'
+          - "typescript-eslint"
           - eslint
           - eslint-plugin-svelte
           - globals
           - svelte
           - typescript
-          - '@stylistic/eslint-plugin'
+          - "@stylistic/eslint-plugin"
 
   - repo: https://github.com/pecigonzalo/pre-commit-shfmt
     rev: v2.2.0
