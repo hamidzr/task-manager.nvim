@@ -2,6 +2,9 @@
 
 A Neovim plugin that helps manage, prioritize, and categorize to-do items in your Markdown lists.
 
+## TODO
+- remove priorities
+
 ## Features
 
 - Interactively assign priority numbers to selected task items

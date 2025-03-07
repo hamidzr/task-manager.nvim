@@ -303,6 +303,9 @@ function M.move_to_category(line, line_num, source_category, target_category)
   local indent, marker = M.get_list_marker(original_line)
   local content = M.get_content(original_line)
 
+  -- Ensure content has no trailing whitespace
+  content = content:gsub("%s+$", "")
+
   -- Format the line without priority, preserving markers and indentation
   local line_without_priority
   if marker ~= "" then
@@ -313,6 +316,9 @@ function M.move_to_category(line, line_num, source_category, target_category)
   else
     line_without_priority = indent .. content:gsub("^%s+", "")
   end
+
+  -- Trim any excess whitespace in the final result
+  line_without_priority = line_without_priority:gsub("%s+$", "")
 
   -- Delete the line and its sub-items from their current position
   vim.api.nvim_buf_set_lines(0, line_num - 1, line_num - 1 + total_lines, true, {})
@@ -330,10 +336,12 @@ function M.move_to_category(line, line_num, source_category, target_category)
 
   target_end = target_end or #buffer_lines + 1
 
-  -- Prepare all lines to insert (parent line + sub-items) - use content without priority
+  -- Prepare all lines to insert (parent line + sub-items)
   local lines_to_insert = { line_without_priority }
-  for _, content in ipairs(original_sub_items) do
-    table.insert(lines_to_insert, content)
+
+  -- Process sub-items one by one - we want to keep them exactly as they are
+  for _, sub_item_content in ipairs(original_sub_items) do
+    table.insert(lines_to_insert, sub_item_content)
   end
 
   -- Insert the lines at the end of the target category
