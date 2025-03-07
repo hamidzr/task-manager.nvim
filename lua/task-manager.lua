@@ -299,6 +299,21 @@ function M.move_to_category(line, line_num, source_category, target_category)
     table.insert(original_sub_items, sub_item.content)
   end
 
+  -- Get the list marker and content without priority
+  local indent, marker = M.get_list_marker(original_line)
+  local content = M.get_content(original_line)
+
+  -- Format the line without priority, preserving markers and indentation
+  local line_without_priority
+  if marker ~= "" then
+    -- Strip trailing spaces from the marker to avoid duplicated spaces
+    marker = marker:gsub("%s+$", "")
+    -- Ensure there's exactly one space between marker and content
+    line_without_priority = indent .. marker .. " " .. content:gsub("^%s+", "")
+  else
+    line_without_priority = indent .. content:gsub("^%s+", "")
+  end
+
   -- Delete the line and its sub-items from their current position
   vim.api.nvim_buf_set_lines(0, line_num - 1, line_num - 1 + total_lines, true, {})
 
@@ -315,8 +330,8 @@ function M.move_to_category(line, line_num, source_category, target_category)
 
   target_end = target_end or #buffer_lines + 1
 
-  -- Prepare all lines to insert (parent line + sub-items) - use exact original content
-  local lines_to_insert = { original_line }
+  -- Prepare all lines to insert (parent line + sub-items) - use content without priority
+  local lines_to_insert = { line_without_priority }
   for _, content in ipairs(original_sub_items) do
     table.insert(lines_to_insert, content)
   end
