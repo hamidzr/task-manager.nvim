@@ -73,6 +73,20 @@ function M.setup(user_config)
     ':<C-u>lua require("task-manager").sort_by_priority()<CR>',
     { noremap = true, silent = true, desc = "Sort todo items by priority" }
   )
+
+  -- Toggle checkbox in normal mode
+  vim.api.nvim_set_keymap(
+    'n',
+    leader .. "tc",
+    ':lua require("task-manager").toggle_checkbox()<CR>',
+    { noremap = true, silent = true, desc = "Toggle checkbox state" }
+  )
+
+  -- Update the config documentation if it wasn't already in user_config
+  if not (user_config and user_config.keybindings and user_config.keybindings.toggle_checkbox) then
+    M.config.keybindings.toggle_checkbox = "tc" -- (t)odo (c)heckbox toggle
+  end
+
 end
 
 -- Extract existing priority from a line, if any
@@ -668,6 +682,42 @@ function M.sort_by_priority()
 
   -- Notify the user that the operation is complete
   vim.api.nvim_echo({ { "Sorting complete", "Normal" } }, true, {})
+end
+
+-- Function to toggle checkbox state in Markdown lists
+function M.toggle_checkbox()
+  -- Get the current line
+  local line_num = vim.fn.line(".")
+  local line = vim.fn.getline(line_num)
+
+  -- Pattern to detect checkboxes in various formats
+  local checkbox_pattern = "(%-%s+)%[(.?)%]"
+  local list_pattern = "^(%s*%-%s+)%[(.?)%](.*)$"
+
+  -- Check if the line contains a checkbox
+  local prefix, state, suffix = line:match(list_pattern)
+
+  if prefix then
+    -- Toggle the checkbox state
+    local new_state = ""
+    if state == "" or state == " " then
+      new_state = "x"
+    else
+      new_state = " "
+    end
+
+    -- Create the new line with toggled state
+    local new_line = prefix .. "[" .. new_state .. "]" .. suffix
+
+    -- Replace the line
+    vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, true, {new_line})
+
+    -- Provide feedback
+    local status = new_state == "x" and "checked" or "unchecked"
+    vim.api.nvim_echo({{string.format("Checkbox toggled (%s)", status), "Normal"}}, true, {})
+  else
+    vim.api.nvim_echo({{string.format("No checkbox found on line %d", line_num), "WarningMsg"}}, true, {})
+  end
 end
 
 return M
