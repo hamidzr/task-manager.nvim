@@ -15,6 +15,7 @@ M.config = {
     prioritize_all = "ta",   -- (t)odo (a)ll prioritize
     prioritize_new = "tn",   -- (t)odo (n)ew prioritize
     sort_by_priority = "ts", -- (t)odo (s)ort
+    toggle_checkbox = "tx",  -- (t)odo (x) checkbox toggle
   },
   -- Category heading pattern (Markdown h2)
   category_pattern = "^%s*##%s+(.+)$",
@@ -77,16 +78,10 @@ function M.setup(user_config)
   -- Toggle checkbox in normal mode
   vim.api.nvim_set_keymap(
     'n',
-    leader .. "tc",
+    leader .. M.config.keybindings.toggle_checkbox,
     ':lua require("task-manager").toggle_checkbox()<CR>',
     { noremap = true, silent = true, desc = "Toggle checkbox state" }
   )
-
-  -- Update the config documentation if it wasn't already in user_config
-  if not (user_config and user_config.keybindings and user_config.keybindings.toggle_checkbox) then
-    M.config.keybindings.toggle_checkbox = "tc" -- (t)odo (c)heckbox toggle
-  end
-
 end
 
 -- Extract existing priority from a line, if any
@@ -316,6 +311,9 @@ function M.move_to_category(line, line_num, source_category, target_category)
   -- Get the list marker and content without priority
   local indent, marker = M.get_list_marker(original_line)
   local content = M.get_content(original_line)
+
+  -- Remove any existing priority tag
+  content = content:gsub("%s*%[p%d+%]%s*", " ")
 
   -- Ensure content has no trailing whitespace
   content = content:gsub("%s+$", "")
@@ -690,33 +688,32 @@ function M.toggle_checkbox()
   local line_num = vim.fn.line(".")
   local line = vim.fn.getline(line_num)
 
-  -- Pattern to detect checkboxes in various formats
-  local checkbox_pattern = "(%-%s+)%[(.?)%]"
-  local list_pattern = "^(%s*%-%s+)%[(.?)%](.*)$"
+  -- Pattern to detect checkboxes and list items
+  local list_pattern = "^(%s*%-%s+)(.*)$"
+  local checkbox_pattern = "^(%s*%-%s+)%[([x%s]?)%](.*)$"
 
-  -- Check if the line contains a checkbox
-  local prefix, state, suffix = line:match(list_pattern)
-
+  -- Check if line has a checkbox
+  local prefix, state, suffix = line:match(checkbox_pattern)
+  
   if prefix then
-    -- Toggle the checkbox state
-    local new_state = ""
-    if state == "" or state == " " then
-      new_state = "x"
-    else
-      new_state = " "
-    end
-
-    -- Create the new line with toggled state
+    -- Toggle existing checkbox
+    local new_state = (state == "" or state == " ") and "x" or " "
     local new_line = prefix .. "[" .. new_state .. "]" .. suffix
-
-    -- Replace the line
     vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, true, {new_line})
-
-    -- Provide feedback
+    
     local status = new_state == "x" and "checked" or "unchecked"
     vim.api.nvim_echo({{string.format("Checkbox toggled (%s)", status), "Normal"}}, true, {})
   else
-    vim.api.nvim_echo({{string.format("No checkbox found on line %d", line_num), "WarningMsg"}}, true, {})
+    -- Check if it's a list item without checkbox
+    local list_prefix, content = line:match(list_pattern)
+    if list_prefix and vim.bo.filetype == "markdown" then
+      -- Create new checkbox in checked state
+      local new_line = list_prefix .. "[x] " .. content
+      vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, true, {new_line})
+      vim.api.nvim_echo({{"Checkbox created (checked)", "Normal"}}, true, {})
+    else
+      vim.api.nvim_echo({{string.format("No list item found on line %d", line_num), "WarningMsg"}}, true, {})
+    end
   end
 end
 
