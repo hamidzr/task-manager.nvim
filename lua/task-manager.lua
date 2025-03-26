@@ -82,6 +82,14 @@ function M.setup(user_config)
     ':lua require("task-manager").toggle_checkbox()<CR>',
     { noremap = true, silent = true, desc = "Toggle checkbox state" }
   )
+
+  -- Toggle checkbox in visual mode
+  vim.api.nvim_set_keymap(
+    'v',
+    leader .. M.config.keybindings.toggle_checkbox,
+    ':<C-u>lua require("task-manager").toggle_checkbox_visual()<CR>',
+    { noremap = true, silent = true, desc = "Toggle checkbox state for selected lines" }
+  )
 end
 
 -- Extract existing priority from a line, if any
@@ -402,6 +410,63 @@ function M.display_category_shortcuts(categories)
   vim.api.nvim_echo(msg, true, {})
 end
 
+-- Function to toggle checkbox state in Markdown lists
+function M.toggle_checkbox()
+  -- Get the current line
+  local line_num = vim.fn.line(".")
+  local line = vim.fn.getline(line_num)
+  M.toggle_checkbox_for_line(line_num, line)
+end
+
+-- Helper function to toggle checkbox for a single line
+function M.toggle_checkbox_for_line(line_num, line)
+  -- Pattern to detect checkboxes and list items
+  local list_pattern = "^(%s*%-%s+)(.*)$"
+  local checkbox_pattern = "^(%s*%-%s+)%[([x%s]?)%](.*)$"
+
+  -- Check if line has a checkbox
+  local prefix, state, suffix = line:match(checkbox_pattern)
+  
+  if prefix then
+    -- Toggle existing checkbox
+    local new_state = (state == "" or state == " ") and "x" or " "
+    local new_line = prefix .. "[" .. new_state .. "]" .. suffix
+    vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, true, {new_line})
+    
+    local status = new_state == "x" and "checked" or "unchecked"
+    vim.api.nvim_echo({{string.format("Checkbox toggled (%s)", status), "Normal"}}, true, {})
+  else
+    -- Check if it's a list item without checkbox
+    local list_prefix, content = line:match(list_pattern)
+    if list_prefix and vim.bo.filetype == "markdown" then
+      -- Create new checkbox in checked state
+      local new_line = list_prefix .. "[x] " .. content
+      vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, true, {new_line})
+      vim.api.nvim_echo({{"Checkbox created (checked)", "Normal"}}, true, {})
+    else
+      vim.api.nvim_echo({{string.format("No list item found on line %d", line_num), "WarningMsg"}}, true, {})
+    end
+  end
+end
+
+-- Function to toggle checkbox state for multiple lines in visual mode
+function M.toggle_checkbox_visual()
+  -- Get the visual selection range
+  local start_line = vim.fn.line("'<")
+  local end_line = vim.fn.line("'>")
+
+  -- Process each line in the selection
+  for line_num = start_line, end_line do
+    local line = vim.fn.getline(line_num)
+    M.toggle_checkbox_for_line(line_num, line)
+  end
+end
+
+-- Check if a line has a checked checkbox
+function M.is_checked_item(line)
+  return line:match("^%s*%-%s+%[x%]") ~= nil
+end
+
 -- Interactive prioritization of selected lines
 function M.prioritize_selected(skip_prioritized)
   -- Get all categories
@@ -427,10 +492,14 @@ function M.prioritize_selected(skip_prioritized)
   -- Get the lines in the selection
   local lines = {}
   for i = start_line, end_line do
-    table.insert(lines, {
-      content = vim.fn.getline(i),
-      line_num = i
-    })
+    local line = vim.fn.getline(i)
+    -- Skip checked items
+    if not M.is_checked_item(line) then
+      table.insert(lines, {
+        content = line,
+        line_num = i
+      })
+    end
   end
 
   -- Process each line interactively
@@ -597,6 +666,7 @@ function M.sort_by_priority()
         local line = block.lines[i]
         local is_heading = M.is_category_heading(line)
         local is_sub = M.is_sub_item(line)
+        local is_checked = M.is_checked_item(line)
 
         if is_heading or is_sub then
           -- Skip headings and sub-items (we handle them as part of parent items)
@@ -607,7 +677,8 @@ function M.sort_by_priority()
             parent = {
               line = line,
               priority = M.get_priority(line),
-              original_pos = i
+              original_pos = i,
+              is_checked = is_checked
             },
             sub_items = {}
           }
@@ -626,6 +697,11 @@ function M.sort_by_priority()
 
       -- Sort the groups by parent priority (stable sort)
       table.sort(item_groups, function(a, b)
+        -- Move checked items to the bottom
+        if a.parent.is_checked ~= b.parent.is_checked then
+          return not a.parent.is_checked
+        end
+
         -- Both have priorities
         if a.parent.priority and b.parent.priority then
           if a.parent.priority ~= b.parent.priority then
@@ -680,41 +756,6 @@ function M.sort_by_priority()
 
   -- Notify the user that the operation is complete
   vim.api.nvim_echo({ { "Sorting complete", "Normal" } }, true, {})
-end
-
--- Function to toggle checkbox state in Markdown lists
-function M.toggle_checkbox()
-  -- Get the current line
-  local line_num = vim.fn.line(".")
-  local line = vim.fn.getline(line_num)
-
-  -- Pattern to detect checkboxes and list items
-  local list_pattern = "^(%s*%-%s+)(.*)$"
-  local checkbox_pattern = "^(%s*%-%s+)%[([x%s]?)%](.*)$"
-
-  -- Check if line has a checkbox
-  local prefix, state, suffix = line:match(checkbox_pattern)
-  
-  if prefix then
-    -- Toggle existing checkbox
-    local new_state = (state == "" or state == " ") and "x" or " "
-    local new_line = prefix .. "[" .. new_state .. "]" .. suffix
-    vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, true, {new_line})
-    
-    local status = new_state == "x" and "checked" or "unchecked"
-    vim.api.nvim_echo({{string.format("Checkbox toggled (%s)", status), "Normal"}}, true, {})
-  else
-    -- Check if it's a list item without checkbox
-    local list_prefix, content = line:match(list_pattern)
-    if list_prefix and vim.bo.filetype == "markdown" then
-      -- Create new checkbox in checked state
-      local new_line = list_prefix .. "[x] " .. content
-      vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, true, {new_line})
-      vim.api.nvim_echo({{"Checkbox created (checked)", "Normal"}}, true, {})
-    else
-      vim.api.nvim_echo({{string.format("No list item found on line %d", line_num), "WarningMsg"}}, true, {})
-    end
-  end
 end
 
 return M
