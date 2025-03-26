@@ -4,6 +4,8 @@ A Neovim plugin that helps manage, prioritize, and categorize to-do items in you
 
 ## TODO
 - remove priorities
+- tx to also work in visual mode and over many lines
+- ts and ta to ignore [x] items. sort at the bottom
 
 ## Features
 
