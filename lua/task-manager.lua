@@ -471,10 +471,7 @@ end
 function M.prioritize_selected(skip_prioritized)
   -- Get all categories
   local categories = M.get_all_categories()
-  if #categories == 0 then
-    vim.api.nvim_echo({ { "No categories found in the document", "ErrorMsg" } }, true, {})
-    return
-  end
+  local has_categories = #categories > 0
 
   -- Create a map of shortcuts to categories for quick lookup
   local shortcut_map = {}
@@ -482,8 +479,19 @@ function M.prioritize_selected(skip_prioritized)
     shortcut_map[cat.shortcut] = cat
   end
 
-  -- Display category shortcuts
-  M.display_category_shortcuts(categories)
+  -- Display category shortcuts only if categories exist
+  if has_categories then
+    M.display_category_shortcuts(categories)
+  else
+    vim.api.nvim_echo({
+      { "No categories found. You can only set priorities.\n", "WarningMsg" },
+      { "Use ", "Normal" },
+      { "1-9", "Question" },
+      { " for priorities or ", "Normal" },
+      { "q", "Question" },
+      { " to quit.\n", "Normal" }
+    }, true, {})
+  end
 
   -- Get the current visual selection
   local start_line = vim.fn.line("'<")
@@ -520,7 +528,7 @@ function M.prioritize_selected(skip_prioritized)
     -- Skip already prioritized items if requested
     if not (skip_prioritized and current_priority) then
       -- Find the current category for this line
-      local current_category = M.find_line_category(line_num, categories)
+      local current_category = has_categories and M.find_line_category(line_num, categories) or nil
 
       -- Save cursor position
       local saved_view = vim.fn.winsaveview()
@@ -557,7 +565,7 @@ function M.prioritize_selected(skip_prioritized)
         local priority = tonumber(input)
         local new_line = M.format_with_priority(line, priority)
         vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, true, { new_line })
-      elseif shortcut_map[input] then
+      elseif has_categories and shortcut_map[input] then
         -- Move to another category
         local target_category = shortcut_map[input]
         if current_category and current_category.name ~= target_category.name then
