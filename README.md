@@ -109,7 +109,7 @@ The plugin expects your to-do list to be organized with Markdown headings as cat
 
 - `<leader>ta` - Prioritize all selected items (reprioritize everything)
 - `<leader>tn` - Prioritize only new items (skip already prioritized items)
-- `<leader>ts` - Sort selected items by priority (stable sort within each category)
+- `<leader>ts` - Sort selected items by priority (stable sort within each category, checked items at bottom)
 
 ### Prioritization Process
 
@@ -138,7 +138,7 @@ Starting with:
 ```markdown
 ## Work
 
-- Fix bug in login form
+- [x] Fix bug in login form
 - [p1] Prepare for meeting
 
 ## Personal
@@ -153,7 +153,7 @@ After prioritization and category changes:
 ## Work
 
 - [p1] Prepare for meeting
-- [p2] Fix bug in login form
+- [x] Fix bug in login form
 
 ## Personal
 
