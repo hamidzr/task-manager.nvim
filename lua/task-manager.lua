@@ -155,6 +155,8 @@ function M.format_with_priority(line, priority)
     if marker ~= "" then
       -- Format with priority and preserve exact formatting
       local formatted = string.format(M.config.priority_format, indent .. marker, priority, content)
+      -- Remove any double spaces that might have been created
+      formatted = formatted:gsub("%s%s+", " ")
       return formatted
     end
   end
@@ -479,6 +481,12 @@ function M.prioritize_selected(skip_prioritized)
     shortcut_map[cat.shortcut] = cat
   end
 
+  -- Store all pending changes
+  local changes = {
+    lines = {}, -- {line_num = N, content = "new content"}
+    moves = {}, -- {from = N, to = M, content = "content", sub_items = {...}}
+  }
+
   -- Display category shortcuts only if categories exist
   if has_categories then
     M.display_category_shortcuts(categories)
@@ -530,13 +538,6 @@ function M.prioritize_selected(skip_prioritized)
       -- Find the current category for this line
       local current_category = has_categories and M.find_line_category(line_num, categories) or nil
 
-      -- Save cursor position
-      local saved_view = vim.fn.winsaveview()
-
-      -- Highlight the current line
-      vim.api.nvim_win_set_cursor(0, { line_num, 0 })
-      vim.cmd("normal! V")
-
       -- Prompt for priority or category change
       local prompt = string.format("Line %d", line_num)
       if current_category then
@@ -554,54 +555,74 @@ function M.prioritize_selected(skip_prioritized)
 
       -- Process input
       if input == "q" then
-        break
+        -- Cancel all changes
+        vim.api.nvim_echo({ { "Operation cancelled", "WarningMsg" } }, true, {})
+        return
       elseif input == "s" then
-        -- Skip this item (do nothing and move to next)
-        vim.api.nvim_echo({
-          { "Skipped", "Normal" }
-        }, true, {})
+        -- Skip this item
+        vim.api.nvim_echo({ { "Skipped", "Normal" } }, true, {})
       elseif input:match("[1-9]") then
-        -- Assign priority
+        -- Queue priority change
         local priority = tonumber(input)
         local new_line = M.format_with_priority(line, priority)
-        vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, true, { new_line })
+        table.insert(changes.lines, {
+          line_num = line_num,
+          content = new_line
+        })
       elseif has_categories and shortcut_map[input] then
-        -- Move to another category
+        -- Queue category move
         local target_category = shortcut_map[input]
         if current_category and current_category.name ~= target_category.name then
-          -- Move the line to the new category
-          local new_line_num = M.move_to_category(line, line_num, current_category, target_category)
+          -- Find sub-items
+          local sub_items = M.find_sub_items(line_num)
+          
+          -- Queue the move with the full target category info
+          table.insert(changes.moves, {
+            from = line_num,
+            target_category = target_category,  -- Store the full category object
+            content = line,
+            sub_items = sub_items
+          })
 
-          -- Update the line data for the next iteration
-          line_data.line_num = new_line_num
-
-          -- Notify about the move
+          -- Notify about pending move
           vim.api.nvim_echo({
-            { string.format("Moved to %s", target_category.name), "Normal" }
+            { string.format("Will move to %s", target_category.name), "Normal" }
           }, true, {})
-
-          -- Special handling: since we moved the line, we may need to adjust other line numbers
-          for j = i + 1, #lines do
-            if lines[j].line_num > line_num then
-              lines[j].line_num = lines[j].line_num - 1
-            end
-          end
-
-          -- Skip incrementing i since we need to process the same item again (at its new position)
-          goto continue
         end
       end
-
-      -- Restore cursor position
-      vim.fn.winrestview(saved_view)
     end
 
     i = i + 1
     ::continue::
   end
 
-  -- Notify the user that the operation is complete
-  vim.api.nvim_echo({ { "Prioritization complete", "Normal" } }, true, {})
+  -- Apply all changes
+  if #changes.lines > 0 or #changes.moves > 0 then
+    -- First apply all moves (from bottom to top to preserve line numbers)
+    table.sort(changes.moves, function(a, b) return a.from > b.from end)
+    for _, move in ipairs(changes.moves) do
+      local new_line_num = M.move_to_category(move.content, move.from, nil, {
+        line_num = move.target_category.line_num,
+        name = move.target_category.name
+      })
+      
+      -- Update any pending line changes that were after this move
+      for _, change in ipairs(changes.lines) do
+        if change.line_num > move.from then
+          change.line_num = change.line_num - 1
+        end
+      end
+    end
+
+    -- Then apply all line changes
+    for _, change in ipairs(changes.lines) do
+      vim.api.nvim_buf_set_lines(0, change.line_num - 1, change.line_num, true, { change.content })
+    end
+
+    vim.api.nvim_echo({ { "All changes applied", "Normal" } }, true, {})
+  else
+    vim.api.nvim_echo({ { "No changes made", "Normal" } }, true, {})
+  end
 end
 
 -- Sort selected lines by priority (stable sort within categories)
