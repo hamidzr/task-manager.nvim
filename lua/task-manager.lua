@@ -518,8 +518,19 @@ function M.prioritize_selected(skip_prioritized)
     end
   end
 
+  -- Calculate total lines to process (considering skip_prioritized)
+  local total_lines = 0
+  for _, line_data in ipairs(lines) do
+    local line = line_data.content
+    local current_priority = M.get_priority(line)
+    if not (skip_prioritized and current_priority) then
+      total_lines = total_lines + 1
+    end
+  end
+
   -- Process each line interactively
   local i = 1
+  local processed_lines = 0
   while i <= #lines do
     local line_data = lines[i]
     local line = line_data.content
@@ -535,11 +546,15 @@ function M.prioritize_selected(skip_prioritized)
 
     -- Skip already prioritized items if requested
     if not (skip_prioritized and current_priority) then
+      processed_lines = processed_lines + 1
       -- Find the current category for this line
       local current_category = has_categories and M.find_line_category(line_num, categories) or nil
 
+      -- Calculate progress percentage
+      local progress = math.floor((processed_lines / total_lines) * 100)
+
       -- Prompt for priority or category change
-      local prompt = string.format("Line %d", line_num)
+      local prompt = string.format("Line %d (%d%%)", line_num, progress)
       if current_category then
         prompt = prompt .. string.format(" (in %s)", current_category.name)
       end
