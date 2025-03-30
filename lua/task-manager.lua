@@ -545,9 +545,12 @@ function M.prioritize_selected(skip_prioritized)
       end
       prompt = prompt .. ": "
 
+      -- Get the line content without priority for display
+      local display_line = line:gsub("%s*%[p%d+%]%s*", " "):gsub("^%s+", "")
+
       vim.api.nvim_echo({
         { prompt,                "Question" },
-        { line:gsub("^%s+", ""), "Normal" }
+        { display_line, "Normal" }
       }, true, {})
 
       local char = vim.fn.getchar()
@@ -555,9 +558,52 @@ function M.prioritize_selected(skip_prioritized)
 
       -- Process input
       if input == "q" then
-        -- Cancel all changes
-        vim.api.nvim_echo({ { "Operation cancelled", "WarningMsg" } }, true, {})
-        return
+        -- If there are pending changes, ask for confirmation
+        if #changes.lines > 0 or #changes.moves > 0 then
+          vim.api.nvim_echo({
+            { "You have pending changes. Apply them? (y/n): ", "Question" }
+          }, true, {})
+          
+          local confirm_char = vim.fn.getchar()
+          local confirm_input = confirm_char == 27 and "n" or vim.fn.nr2char(confirm_char)
+          
+          if confirm_input == "y" then
+            -- Apply changes and return
+            if #changes.lines > 0 or #changes.moves > 0 then
+              -- First apply all moves (from bottom to top to preserve line numbers)
+              table.sort(changes.moves, function(a, b) return a.from > b.from end)
+              for _, move in ipairs(changes.moves) do
+                local new_line_num = M.move_to_category(move.content, move.from, nil, {
+                  line_num = move.target_category.line_num,
+                  name = move.target_category.name
+                })
+                
+                -- Update any pending line changes that were after this move
+                for _, change in ipairs(changes.lines) do
+                  if change.line_num > move.from then
+                    change.line_num = change.line_num - 1
+                  end
+                end
+              end
+
+              -- Then apply all line changes
+              for _, change in ipairs(changes.lines) do
+                vim.api.nvim_buf_set_lines(0, change.line_num - 1, change.line_num, true, { change.content })
+              end
+
+              vim.api.nvim_echo({ { "Changes applied", "Normal" } }, true, {})
+            end
+            return
+          else
+            -- Cancel all changes
+            vim.api.nvim_echo({ { "Operation cancelled", "WarningMsg" } }, true, {})
+            return
+          end
+        else
+          -- No pending changes, just return
+          vim.api.nvim_echo({ { "Operation cancelled", "WarningMsg" } }, true, {})
+          return
+        end
       elseif input == "s" then
         -- Skip this item
         vim.api.nvim_echo({ { "Skipped", "Normal" } }, true, {})
