@@ -2,18 +2,15 @@
 
 A Neovim plugin that helps manage, prioritize, and categorize to-do items in your Markdown lists.
 
-## TODO
-- remove priorities
-- tx to also work in visual mode and over many lines
-- ts and ta to ignore [x] items. sort at the bottom
-
 ## Features
 
 - Interactively assign priority numbers to selected task items
 - Move tasks between categories with auto-generated shortcuts
 - Option to prioritize only unprioritized items or reprioritize everything
 - Sort tasks by priority (stable sort within each category)
+- Toggle task checkboxes in normal and visual mode
 - Works with Markdown lists, bullet points, and numbered lists
+- Preserves task hierarchy and sub-items when moving between categories
 
 ## Installation
 
@@ -41,11 +38,11 @@ Then add to your init.vim or init.lua:
 require('task-manager').setup()
 ```
 
-Lazy Lua for neovim:
+### Using Lazy.nvim
 
 ```lua
 {
-  'hamidzr/task-manager.nvim.nvim',
+  'hamidzr/task-manager.nvim',
   name='task-manager',
   config = function()
     require('task-manager').setup({
@@ -73,6 +70,7 @@ require('task-manager').setup({
     prioritize_all = "ta",      -- (t)odo (a)ll prioritize
     prioritize_new = "tn",      -- (t)odo (n)ew prioritize
     sort_by_priority = "ts",    -- (t)odo (s)ort
+    toggle_checkbox = "tx",     -- (t)odo (x) checkbox toggle
   },
 
   -- Category heading pattern (Markdown h2)
@@ -110,6 +108,7 @@ The plugin expects your to-do list to be organized with Markdown headings as cat
 - `<leader>ta` - Prioritize all selected items (reprioritize everything)
 - `<leader>tn` - Prioritize only new items (skip already prioritized items)
 - `<leader>ts` - Sort selected items by priority (stable sort within each category, checked items at bottom)
+- `<leader>tx` - Toggle checkbox state (works in both normal and visual mode)
 
 ### Prioritization Process
 
@@ -119,17 +118,23 @@ When you initiate prioritization:
 2. For each line, you'll be prompted to:
    - Enter a number (1-9) to set a priority
    - Enter a category shortcut to move the task to another category
+   - Press 's' to skip the current item
    - Press 'q' to quit the process
+3. If you quit with pending changes:
+   - You'll be prompted to apply or discard the changes
+   - Changes include both priority updates and category moves
+   - All changes are applied atomically (all or nothing)
 
-### Category Shortcuts
+### Sorting Behavior
 
-The plugin automatically generates single-letter shortcuts for each category, preferring:
+The sort command (`ts`) organizes tasks with the following rules:
 
-1. First letter of each word in the category name
-2. Other letters in the category name
-3. Any available letter if needed
-
-These shortcuts are displayed when you start the prioritization process.
+1. Tasks are sorted within their respective categories
+2. Checked items (`[x]`) are moved to the bottom of their category
+3. Unchecked items are sorted by priority (1-9)
+4. Items without priorities maintain their relative order
+5. Sub-items (indented tasks) stay with their parent items
+6. Category headings remain at the top of their sections
 
 ### Example
 
@@ -140,6 +145,8 @@ Starting with:
 
 - [x] Fix bug in login form
 - [p1] Prepare for meeting
+  - [x] Review agenda
+  - [p2] Prepare slides
 
 ## Personal
 
@@ -147,19 +154,32 @@ Starting with:
 - [p3] Call dentist
 ```
 
-After prioritization and category changes:
+After sorting (`ts`):
 
 ```markdown
 ## Work
 
 - [p1] Prepare for meeting
+  - [p2] Prepare slides
+  - [x] Review agenda
 - [x] Fix bug in login form
 
 ## Personal
 
 - [p3] Call dentist
-- [p4] Buy groceries
+- Buy groceries
 ```
+
+Note: When sorting tasks by priority (`ts`), checked items (`[x]`) are automatically moved to the bottom of their respective categories, regardless of their priority.
+
+### Checkbox Toggling
+
+The plugin provides a convenient way to toggle task checkboxes:
+
+- In normal mode: Place your cursor on a task line and press `<leader>tx` to toggle its checkbox state
+- In visual mode: Select multiple task lines and press `<leader>tx` to toggle all selected checkboxes
+
+If a line doesn't have a checkbox, pressing `<leader>tx` will add one in the checked state (`[x]`).
 
 ## File Structure
 
@@ -178,6 +198,11 @@ Or if you're packaging it as a proper plugin:
         ├── init.lua
         └── README.md
 ```
+
+## TODO
+- remove priorities
+- [x] tx to also work in visual mode and over many lines
+- [x] ts and ta to ignore [x] items. sort at the bottom
 
 ## License
 
