@@ -471,6 +471,10 @@ end
 
 -- Interactive prioritization of selected lines
 function M.prioritize_selected(skip_prioritized)
+  -- Get the original visual selection range
+  local original_start_line = vim.fn.line("'<")
+  local original_end_line = vim.fn.line("'>")
+
   -- Get all categories
   local categories = M.get_all_categories()
   local has_categories = #categories > 0
@@ -585,6 +589,12 @@ function M.prioritize_selected(skip_prioritized)
           if confirm_input == "y" then
             -- Apply changes and return
             if #changes.lines > 0 or #changes.moves > 0 then
+              -- Track which lines were moved away to calculate new selection
+              local moved_lines = {}
+              for _, move in ipairs(changes.moves) do
+                moved_lines[move.from] = true
+              end
+
               -- First apply all moves (from bottom to top to preserve line numbers)
               table.sort(changes.moves, function(a, b) return a.from > b.from end)
               for _, move in ipairs(changes.moves) do
@@ -604,6 +614,33 @@ function M.prioritize_selected(skip_prioritized)
               -- Then apply all line changes
               for _, change in ipairs(changes.lines) do
                 vim.api.nvim_buf_set_lines(0, change.line_num - 1, change.line_num, true, { change.content })
+              end
+
+              -- Calculate new selection range for lines that weren't moved
+              local new_start_line = nil
+              local new_end_line = nil
+              local lines_removed = 0
+              
+              for line_num = original_start_line, original_end_line do
+                if moved_lines[line_num] then
+                  lines_removed = lines_removed + 1
+                else
+                  -- This line wasn't moved, include it in the new selection
+                  local adjusted_line_num = line_num - lines_removed
+                  if new_start_line == nil then
+                    new_start_line = adjusted_line_num
+                  end
+                  new_end_line = adjusted_line_num
+                end
+              end
+
+              -- Restore visual selection for lines that weren't moved
+              if new_start_line and new_end_line and new_start_line <= new_end_line then
+                vim.fn.setpos("'<", {0, new_start_line, 1, 0})
+                vim.fn.setpos("'>", {0, new_end_line, vim.fn.col("$"), 0})
+                
+                -- Enter visual line mode to show the selection
+                vim.cmd("normal! gv")
               end
 
               vim.api.nvim_echo({ { "Changes applied", "Normal" } }, true, {})
@@ -659,6 +696,12 @@ function M.prioritize_selected(skip_prioritized)
 
   -- Apply all changes
   if #changes.lines > 0 or #changes.moves > 0 then
+    -- Track which lines were moved away to calculate new selection
+    local moved_lines = {}
+    for _, move in ipairs(changes.moves) do
+      moved_lines[move.from] = true
+    end
+
     -- First apply all moves (from bottom to top to preserve line numbers)
     table.sort(changes.moves, function(a, b) return a.from > b.from end)
     for _, move in ipairs(changes.moves) do
@@ -678,6 +721,33 @@ function M.prioritize_selected(skip_prioritized)
     -- Then apply all line changes
     for _, change in ipairs(changes.lines) do
       vim.api.nvim_buf_set_lines(0, change.line_num - 1, change.line_num, true, { change.content })
+    end
+
+    -- Calculate new selection range for lines that weren't moved
+    local new_start_line = nil
+    local new_end_line = nil
+    local lines_removed = 0
+    
+    for line_num = original_start_line, original_end_line do
+      if moved_lines[line_num] then
+        lines_removed = lines_removed + 1
+      else
+        -- This line wasn't moved, include it in the new selection
+        local adjusted_line_num = line_num - lines_removed
+        if new_start_line == nil then
+          new_start_line = adjusted_line_num
+        end
+        new_end_line = adjusted_line_num
+      end
+    end
+
+    -- Restore visual selection for lines that weren't moved
+    if new_start_line and new_end_line and new_start_line <= new_end_line then
+      vim.fn.setpos("'<", {0, new_start_line, 1, 0})
+      vim.fn.setpos("'>", {0, new_end_line, vim.fn.col("$"), 0})
+      
+      -- Enter visual line mode to show the selection
+      vim.cmd("normal! gv")
     end
 
     vim.api.nvim_echo({ { "All changes applied", "Normal" } }, true, {})
@@ -843,6 +913,13 @@ function M.sort_by_priority()
 
   -- Replace the lines in the buffer
   vim.api.nvim_buf_set_lines(0, start_line - 1, end_line, true, sorted_lines)
+
+  -- Restore visual selection to keep the sorted lines selected
+  vim.fn.setpos("'<", {0, start_line, 1, 0})
+  vim.fn.setpos("'>", {0, start_line + #sorted_lines - 1, vim.fn.col("$"), 0})
+  
+  -- Enter visual line mode to show the selection
+  vim.cmd("normal! gv")
 
   -- Notify the user that the operation is complete
   vim.api.nvim_echo({ { "Sorting complete", "Normal" } }, true, {})

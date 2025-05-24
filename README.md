@@ -203,7 +203,5 @@ Or if you're packaging it as a proper plugin:
 - remove priorities
 - [x] tx to also work in visual mode and over many lines
 - [x] ts and ta to ignore [x] items. sort at the bottom
-
-## License
-
-MIT
+- [ ] highlight the same lines (or reduced set because of the moves) after changes
+- [ ] should work on a list that's nested if only l1 lists are selected only operate on thoese. neesd more thinking
