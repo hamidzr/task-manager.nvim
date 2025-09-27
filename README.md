@@ -9,6 +9,7 @@ A Neovim plugin that helps manage, prioritize, and categorize to-do items in you
 - Option to prioritize only unprioritized items or reprioritize everything
 - Sort tasks by priority (stable sort within each category)
 - Toggle task checkboxes in normal and visual mode
+- Checking a task automatically moves it to the bottom of its section
 - Works with Markdown lists, bullet points, and numbered lists
 - Preserves task hierarchy and sub-items when moving between categories
 
@@ -180,6 +181,8 @@ The plugin provides a convenient way to toggle task checkboxes:
 - In visual mode: Select multiple task lines and press `<leader>tx` to toggle all selected checkboxes
 
 If a line doesn't have a checkbox, pressing `<leader>tx` will add one in the checked state (`[x]`).
+
+When you toggle a checkbox from unchecked (`[ ]`) to checked (`[x]`), the task is automatically moved to the bottom of its current section (between the heading it belongs to and the next heading), keeping completed items out of the way while preserving any sub-items.
 
 ## File Structure
 

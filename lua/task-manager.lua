@@ -373,6 +373,52 @@ function M.move_to_category(line, line_num, source_category, target_category)
   return target_end - 1
 end
 
+-- Move a checked item to the bottom of its current section/category
+function M.move_item_to_section_bottom(line_num)
+  local buffer_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  local line = buffer_lines[line_num]
+
+  if not line or M.is_category_heading(line) or M.is_sub_item(line) then
+    return line_num
+  end
+
+  local sub_items = M.find_sub_items(line_num)
+  local total_lines = 1 + #sub_items
+
+  local search_start = math.min(line_num + total_lines, #buffer_lines + 1)
+  local insert_pos = #buffer_lines + 1
+
+  for i = search_start, #buffer_lines do
+    if M.is_category_heading(buffer_lines[i]) then
+      insert_pos = i
+      break
+    end
+  end
+
+  local trim_end = insert_pos - 1
+  while trim_end >= search_start and buffer_lines[trim_end] and buffer_lines[trim_end]:match("^%s*$") do
+    insert_pos = trim_end
+    trim_end = trim_end - 1
+  end
+
+  local target_pre_remove = insert_pos - total_lines
+  if target_pre_remove <= line_num then
+    return line_num
+  end
+
+  local lines_to_move = { line }
+  for _, sub_item in ipairs(sub_items) do
+    table.insert(lines_to_move, sub_item.content)
+  end
+
+  vim.api.nvim_buf_set_lines(0, line_num - 1, line_num - 1 + total_lines, true, {})
+
+  local adjusted_insert_pos = insert_pos - total_lines
+  vim.api.nvim_buf_set_lines(0, adjusted_insert_pos - 1, adjusted_insert_pos - 1, true, lines_to_move)
+
+  return adjusted_insert_pos
+end
+
 -- Display a formatted table of categories and their shortcuts
 function M.display_category_shortcuts(categories)
   -- Calculate the maximum length of category names for formatting
@@ -428,15 +474,21 @@ function M.toggle_checkbox_for_line(line_num, line)
 
   -- Check if line has a checkbox
   local prefix, state, suffix = line:match(checkbox_pattern)
-  
+
   if prefix then
     -- Toggle existing checkbox
     local new_state = (state == "" or state == " ") and "x" or " "
     local new_line = prefix .. "[" .. new_state .. "]" .. suffix
-    vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, true, {new_line})
-    
-    local status = new_state == "x" and "checked" or "unchecked"
-    vim.api.nvim_echo({{string.format("Checkbox toggled (%s)", status), "Normal"}}, true, {})
+    vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, true, { new_line })
+
+    if new_state == "x" then
+      local new_position = M.move_item_to_section_bottom(line_num)
+      local moved = new_position ~= line_num
+      local message = moved and "Checkbox toggled (checked -> moved to bottom)" or "Checkbox toggled (checked)"
+      vim.api.nvim_echo({ { message, "Normal" } }, true, {})
+    else
+      vim.api.nvim_echo({ { "Checkbox toggled (unchecked)", "Normal" } }, true, {})
+    end
   else
     -- Check if it's a list item without checkbox
     local list_prefix, content = line:match(list_pattern)
@@ -458,7 +510,7 @@ function M.toggle_checkbox_visual()
   local end_line = vim.fn.line("'>")
 
   -- Process each line in the selection
-  for line_num = start_line, end_line do
+  for line_num = end_line, start_line, -1 do
     local line = vim.fn.getline(line_num)
     M.toggle_checkbox_for_line(line_num, line)
   end
