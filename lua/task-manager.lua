@@ -120,33 +120,43 @@ function M.get_list_marker(line)
 end
 
 -- Check if a line is indented (potential sub-item)
-function M.is_sub_item(line)
+function M.is_sub_item(line, base_indent)
   local indent = line:match("^(%s+)")
-  return indent and #indent >= 2
+  local indent_level = indent and #indent or 0
+
+  if base_indent ~= nil then
+    return indent_level > base_indent
+  end
+
+  return indent_level >= 2
 end
 
 -- Extract the content of a line without list marker and priority
 function M.get_content(line)
-  -- Get the indentation
-  local indent = line:match("^(%s*)")
+  if not line then
+    return ""
+  end
 
-  -- Remove list marker while preserving indentation
-  local content = line:gsub("^%s*[%-%*%+]%s+", indent)
-  content = content:gsub("^%s*%d+%.%s+", indent)
+  local content = line
+
+  -- Remove leading indentation and list markers
+  content = content:gsub("^%s*[%-%*%+]%s*", "", 1)
+  content = content:gsub("^%s*%d+%.%s*", "", 1)
 
   -- Remove priority tag if it exists
   content = content:gsub("%s*%[p%d+%]%s*", " ")
 
-  -- Trim trailing whitespace (but keep leading indentation)
-  content = content:gsub("^(%s*)%s*(.-)[%s]*$", "%1%2")
+  -- Trim surrounding whitespace
+  content = content:gsub("^%s+", "")
+  content = content:gsub("%s+$", "")
 
   return content
 end
 
 -- Format a line with the given priority
-function M.format_with_priority(line, priority)
+function M.format_with_priority(line, priority, base_indent)
   -- Only add priority to non-sub-items
-  if not M.is_sub_item(line) then
+  if not M.is_sub_item(line, base_indent) then
     local indent, marker = M.get_list_marker(line)
     local content = M.get_content(line)
     -- Strip trailing spaces from the marker to avoid duplicated spaces in the final format
@@ -155,8 +165,6 @@ function M.format_with_priority(line, priority)
     if marker ~= "" then
       -- Format with priority and preserve exact formatting
       local formatted = string.format(M.config.priority_format, indent .. marker, priority, content)
-      -- Remove any double spaces that might have been created
-      formatted = formatted:gsub("%s%s+", " ")
       return formatted
     end
   end
@@ -173,6 +181,38 @@ end
 -- Extract category name from heading
 function M.get_category_name(heading)
   return heading:match(M.config.category_pattern)
+end
+
+-- Check if a line represents a list item (bullet or numbered)
+function M.is_list_item(line)
+  if not line or line:match("^%s*$") then
+    return false
+  end
+
+  if M.is_category_heading(line) then
+    return false
+  end
+
+  return line:match("^%s*[%-%*%+]%s+") ~= nil or line:match("^%s*%d+%.%s+") ~= nil
+end
+
+-- Determine the minimum indentation level among list items in a set of lines
+function M.get_base_indent(lines)
+  if not lines then
+    return 0
+  end
+
+  local min_indent = nil
+  for _, line in ipairs(lines) do
+    if M.is_list_item(line) then
+      local indent_level = M.get_indent_level(line)
+      if not min_indent or indent_level < min_indent then
+        min_indent = indent_level
+      end
+    end
+  end
+
+  return min_indent or 0
 end
 
 -- Generate a single-letter shortcut for a category name
@@ -561,6 +601,10 @@ function M.prioritize_selected(skip_prioritized)
   local start_line = vim.fn.line("'<")
   local end_line = vim.fn.line("'>")
 
+  -- Determine the baseline indentation for the selection
+  local selection_lines = vim.api.nvim_buf_get_lines(0, start_line - 1, end_line, true)
+  local base_indent = M.get_base_indent(selection_lines)
+
   -- Get the lines in the selection
   local lines = {}
   for i = start_line, end_line do
@@ -593,7 +637,7 @@ function M.prioritize_selected(skip_prioritized)
     local line_num = line_data.line_num
 
     -- Skip category headings and sub-items
-    if M.is_category_heading(line) or M.is_sub_item(line) then
+    if M.is_category_heading(line) or M.is_sub_item(line, base_indent) then
       i = i + 1
       goto continue
     end
@@ -714,7 +758,7 @@ function M.prioritize_selected(skip_prioritized)
       elseif input:match("[1-9]") then
         -- Queue priority change
         local priority = tonumber(input)
-        local new_line = M.format_with_priority(line, priority)
+        local new_line = M.format_with_priority(line, priority, base_indent)
         table.insert(changes.lines, {
           line_num = line_num,
           content = new_line
@@ -870,6 +914,8 @@ function M.sort_by_priority()
         heading = table.remove(block.lines, 1)
       end
 
+      local base_indent = M.get_base_indent(block.lines)
+
       -- Group parent items with their sub-items
       local item_groups = {}
       local i = 1
@@ -877,7 +923,7 @@ function M.sort_by_priority()
       while i <= #block.lines do
         local line = block.lines[i]
         local is_heading = M.is_category_heading(line)
-        local is_sub = M.is_sub_item(line)
+        local is_sub = M.is_sub_item(line, base_indent)
         local is_checked = M.is_checked_item(line)
 
         if is_heading or is_sub then
@@ -885,6 +931,7 @@ function M.sort_by_priority()
           i = i + 1
         else
           -- This is a parent item - find all its sub-items
+          local parent_indent = M.get_indent_level(line)
           local group = {
             parent = {
               line = line,
@@ -897,7 +944,7 @@ function M.sort_by_priority()
 
           -- Collect sub-items
           local j = i + 1
-          while j <= #block.lines and M.is_sub_item(block.lines[j]) do
+          while j <= #block.lines and M.is_sub_item(block.lines[j], parent_indent) do
             table.insert(group.sub_items, block.lines[j])
             j = j + 1
           end
