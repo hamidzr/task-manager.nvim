@@ -418,45 +418,95 @@ function M.move_item_to_section_bottom(line_num)
   local buffer_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
   local line = buffer_lines[line_num]
 
-  if not line or M.is_category_heading(line) or M.is_sub_item(line) then
+  if not line or M.is_category_heading(line) then
     return line_num
   end
 
   local sub_items = M.find_sub_items(line_num)
   local total_lines = 1 + #sub_items
-
-  local search_start = math.min(line_num + total_lines, #buffer_lines + 1)
-  local insert_pos = #buffer_lines + 1
-
-  for i = search_start, #buffer_lines do
-    if M.is_category_heading(buffer_lines[i]) then
-      insert_pos = i
-      break
-    end
-  end
-
-  local trim_end = insert_pos - 1
-  while trim_end >= search_start and buffer_lines[trim_end] and buffer_lines[trim_end]:match("^%s*$") do
-    insert_pos = trim_end
-    trim_end = trim_end - 1
-  end
-
-  local target_pre_remove = insert_pos - total_lines
-  if target_pre_remove <= line_num then
-    return line_num
-  end
-
+  local indent_level = M.get_indent_level(line)
   local lines_to_move = { line }
+
   for _, sub_item in ipairs(sub_items) do
     table.insert(lines_to_move, sub_item.content)
   end
 
+  local buffer_len = #buffer_lines
+  local insert_pos
+
+  if not M.is_sub_item(line) then
+    local search_start = math.min(line_num + total_lines, buffer_len + 1)
+    insert_pos = buffer_len + 1
+
+    for i = search_start, buffer_len do
+      if M.is_category_heading(buffer_lines[i]) then
+        insert_pos = i
+        break
+      end
+    end
+
+    local trim_end = insert_pos - 1
+    while trim_end >= search_start and buffer_lines[trim_end] and buffer_lines[trim_end]:match("^%s*$") do
+      insert_pos = trim_end
+      trim_end = trim_end - 1
+    end
+  else
+    insert_pos = line_num + total_lines
+    local i = insert_pos
+
+    while i <= buffer_len do
+      local current_line = buffer_lines[i]
+
+      if not current_line or current_line:match("^%s*$") then
+        break
+      end
+
+      local current_indent = M.get_indent_level(current_line)
+
+      if current_indent < indent_level then
+        break
+      elseif current_indent == indent_level then
+        if not M.is_list_item(current_line) then
+          break
+        end
+
+        local j = i + 1
+        while j <= buffer_len do
+          local next_line = buffer_lines[j]
+          if not next_line or next_line:match("^%s*$") then
+            break
+          end
+
+          local next_indent = M.get_indent_level(next_line)
+          if next_indent <= indent_level then
+            break
+          end
+
+          j = j + 1
+        end
+
+        insert_pos = j
+        i = j
+      else
+        i = i + 1
+      end
+    end
+  end
+
+  local target_pre_remove = insert_pos - total_lines
+  if not insert_pos or target_pre_remove <= line_num then
+    return line_num
+  end
+
   vim.api.nvim_buf_set_lines(0, line_num - 1, line_num - 1 + total_lines, true, {})
 
-  local adjusted_insert_pos = insert_pos - total_lines
-  vim.api.nvim_buf_set_lines(0, adjusted_insert_pos - 1, adjusted_insert_pos - 1, true, lines_to_move)
+  if insert_pos > line_num then
+    insert_pos = insert_pos - total_lines
+  end
 
-  return adjusted_insert_pos
+  vim.api.nvim_buf_set_lines(0, insert_pos - 1, insert_pos - 1, true, lines_to_move)
+
+  return insert_pos
 end
 
 -- Display a formatted table of categories and their shortcuts
@@ -506,19 +556,76 @@ function M.toggle_checkbox()
   M.toggle_checkbox_for_line(line_num, line)
 end
 
+local function analyze_checkbox_line(line)
+  local indent, marker = M.get_list_marker(line)
+
+  if marker == "" then
+    return nil
+  end
+
+  local prefix_len = #indent + #marker
+  local rest = line:sub(prefix_len + 1)
+  local rest_len = #rest
+  local i = 1
+
+  while i <= rest_len do
+    local char = rest:sub(i, i)
+
+    if char:match("%s") then
+      i = i + 1
+    elseif char == "[" then
+      local closing = rest:find("]", i, true)
+      if not closing then
+        break
+      end
+
+      local content = rest:sub(i + 1, closing - 1)
+
+      if content:match("^[xX%s]?$") then
+        local prefix = line:sub(1, prefix_len + i - 1)
+        local suffix = rest:sub(closing + 1)
+
+        return {
+          has_checkbox = true,
+          prefix = prefix,
+          suffix = suffix,
+          state = content,
+        }
+      else
+        local next_i = closing + 1
+
+        while next_i <= rest_len and rest:sub(next_i, next_i):match("%s") do
+          next_i = next_i + 1
+        end
+
+        i = next_i
+      end
+    else
+      break
+    end
+  end
+
+  return {
+    has_checkbox = false,
+    insert_pos = prefix_len,
+  }
+end
+
 -- Helper function to toggle checkbox for a single line
 function M.toggle_checkbox_for_line(line_num, line)
-  -- Pattern to detect checkboxes and list items
-  local list_pattern = "^(%s*%-%s+)(.*)$"
-  local checkbox_pattern = "^(%s*%-%s+)%[([x%s]?)%](.*)$"
+  local analysis = analyze_checkbox_line(line)
 
-  -- Check if line has a checkbox
-  local prefix, state, suffix = line:match(checkbox_pattern)
+  if not analysis then
+    vim.api.nvim_echo({ { string.format("No list item found on line %d", line_num), "WarningMsg" } }, true, {})
+    return
+  end
 
-  if prefix then
-    -- Toggle existing checkbox
-    local new_state = (state == "" or state == " ") and "x" or " "
-    local new_line = prefix .. "[" .. new_state .. "]" .. suffix
+  if analysis.has_checkbox then
+    local state = analysis.state or ""
+    local is_checked = state:lower() == "x"
+    local new_state = is_checked and " " or "x"
+    local new_line = analysis.prefix .. "[" .. new_state .. "]" .. (analysis.suffix or "")
+
     vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, true, { new_line })
 
     if new_state == "x" then
@@ -530,15 +637,28 @@ function M.toggle_checkbox_for_line(line_num, line)
       vim.api.nvim_echo({ { "Checkbox toggled (unchecked)", "Normal" } }, true, {})
     end
   else
-    -- Check if it's a list item without checkbox
-    local list_prefix, content = line:match(list_pattern)
-    if list_prefix and vim.bo.filetype == "markdown" then
-      -- Create new checkbox in checked state
-      local new_line = list_prefix .. "[x] " .. content
-      vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, true, {new_line})
-      vim.api.nvim_echo({{"Checkbox created (checked)", "Normal"}}, true, {})
+    if vim.bo.filetype == "markdown" then
+      local insert_pos = math.max(analysis.insert_pos or 0, 0)
+      local before = line:sub(1, insert_pos)
+      local after = line:sub(insert_pos + 1)
+
+      local needs_space_before = before ~= "" and not before:match("%s$")
+      local insertion = (needs_space_before and " " or "") .. "[x]"
+
+      if after == "" or not after:match("^%s") then
+        insertion = insertion .. " "
+      end
+
+      local new_line = before .. insertion .. after
+
+      vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, true, { new_line })
+
+      local new_position = M.move_item_to_section_bottom(line_num)
+      local moved = new_position ~= line_num
+      local message = moved and "Checkbox created (checked -> moved to bottom)" or "Checkbox created (checked)"
+      vim.api.nvim_echo({ { message, "Normal" } }, true, {})
     else
-      vim.api.nvim_echo({{string.format("No list item found on line %d", line_num), "WarningMsg"}}, true, {})
+      vim.api.nvim_echo({ { string.format("No list item found on line %d", line_num), "WarningMsg" } }, true, {})
     end
   end
 end
