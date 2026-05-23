@@ -39,6 +39,48 @@ function M.get_indent_level(line)
   return indent and #indent or 0
 end
 
+-- ATX markdown heading level (1 = #, 6 = ######); nil if not a heading
+function M.get_markdown_heading_level(line)
+  if not line then
+    return nil
+  end
+
+  local hashes = line:match("^%s*(#+)%s+%S")
+  return hashes and #hashes or nil
+end
+
+function M.is_markdown_heading(line)
+  return M.get_markdown_heading_level(line) ~= nil
+end
+
+-- Nearest heading above line_num (used for checkbox move boundaries)
+function M.find_enclosing_section_heading(line_num)
+  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+
+  for i = line_num, 1, -1 do
+    local level = M.get_markdown_heading_level(lines[i])
+    if level then
+      return i, level
+    end
+  end
+
+  return nil, nil
+end
+
+-- Line index of the next same-or-higher-level heading after from_line
+function M.find_section_boundary(buffer_lines, from_line, section_level)
+  local buffer_len = #buffer_lines
+
+  for i = from_line, buffer_len do
+    local level = M.get_markdown_heading_level(buffer_lines[i])
+    if level and level <= section_level then
+      return i
+    end
+  end
+
+  return buffer_len + 1
+end
+
 -- Set up the plugin with user config
 function M.setup(user_config)
   -- Merge user config with defaults
@@ -418,7 +460,7 @@ function M.move_item_to_section_bottom(line_num)
   local buffer_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
   local line = buffer_lines[line_num]
 
-  if not line or M.is_category_heading(line) then
+  if not line or M.is_markdown_heading(line) then
     return line_num
   end
 
@@ -438,10 +480,16 @@ function M.move_item_to_section_bottom(line_num)
     local search_start = math.min(line_num + total_lines, buffer_len + 1)
     insert_pos = buffer_len + 1
 
-    for i = search_start, buffer_len do
-      if M.is_category_heading(buffer_lines[i]) then
-        insert_pos = i
-        break
+    local _, section_level = M.find_enclosing_section_heading(line_num)
+    if section_level then
+      -- Stop at the next heading of the same or higher level (e.g. ### not ##)
+      insert_pos = M.find_section_boundary(buffer_lines, search_start, section_level)
+    else
+      for i = search_start, buffer_len do
+        if M.is_category_heading(buffer_lines[i]) then
+          insert_pos = i
+          break
+        end
       end
     end
 
