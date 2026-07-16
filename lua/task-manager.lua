@@ -684,7 +684,17 @@ local function analyze_checkbox_line(line)
   local indent, marker = M.get_list_marker(line)
 
   if marker == "" then
-    return nil
+    -- blank lines and headings stay no-op
+    if line:match("^%s*$") or line:match("^%s*#") then
+      return nil
+    end
+
+    -- plain text line: checkbox-able, but needs a bullet prepended
+    return {
+      has_checkbox = false,
+      insert_pos = #indent,
+      needs_bullet = true,
+    }
   end
 
   local prefix_len = #indent + #marker
@@ -766,8 +776,10 @@ function M.toggle_checkbox_for_line(line_num, line)
       local before = line:sub(1, insert_pos)
       local after = line:sub(insert_pos + 1)
 
-      local needs_space_before = before ~= "" and not before:match("%s$")
-      local insertion = (needs_space_before and " " or "") .. "[x]"
+      local bullet = analysis.needs_bullet and "- " or ""
+      -- when prepending a bullet the space-before logic is unnecessary
+      local needs_space_before = bullet == "" and before ~= "" and not before:match("%s$")
+      local insertion = bullet .. (needs_space_before and " " or "") .. "[x]"
 
       if after == "" or not after:match("^%s") then
         insertion = insertion .. " "
