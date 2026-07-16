@@ -1,0 +1,25 @@
+name: test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  neovim:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Neovim
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y neovim
+
+      - name: Run regression tests
+        run: |
+          nvim --version
+          nvim --headless --clean -u NONE -U NONE -n -l tests/run.lua

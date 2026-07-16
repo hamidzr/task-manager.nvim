@@ -83,11 +83,8 @@ end
 
 -- Set up the plugin with user config
 function M.setup(user_config)
-  -- Merge user config with defaults
   if user_config then
-    for k, v in pairs(user_config) do
-      M.config[k] = v
-    end
+    M.config = vim.tbl_deep_extend("force", M.config, user_config)
   end
 
   -- Set up keybindings
@@ -136,8 +133,32 @@ end
 
 -- Extract existing priority from a line, if any
 function M.get_priority(line)
+  if not line then
+    return nil
+  end
+
   local priority = line:match(M.config.priority_pattern)
   return priority and tonumber(priority) or nil
+end
+
+function M.strip_task_priority(line)
+  if not line then
+    return ""
+  end
+
+  local start_idx, end_idx = line:find(M.config.priority_pattern)
+  if not start_idx then
+    return line
+  end
+
+  local before = line:sub(1, start_idx - 1):gsub("%s+$", "")
+  local after = line:sub(end_idx + 1):gsub("^%s+", "")
+
+  if before ~= "" and after ~= "" then
+    return before .. " " .. after
+  end
+
+  return before .. after
 end
 
 -- Extract the list marker from the beginning of a line (if any)
@@ -185,8 +206,7 @@ function M.get_content(line)
   content = content:gsub("^%s*[%-%*%+]%s*", "", 1)
   content = content:gsub("^%s*%d+%.%s*", "", 1)
 
-  -- Remove priority tag if it exists
-  content = content:gsub("%s*%[p%d+%]%s*", " ")
+  content = M.strip_task_priority(content)
 
   -- Trim surrounding whitespace
   content = content:gsub("^%s+", "")
@@ -213,6 +233,92 @@ function M.format_with_priority(line, priority, base_indent)
 
   -- For sub-items or non-list items, just return the original line
   return line
+end
+
+-- Determine if a line is empty or whitespace-only
+function M.is_blank_line(line)
+  return line:match("^%s*$") ~= nil
+end
+
+-- Find a task block with descendants from a parent line
+function M.get_task_block_lines(lines, start_line)
+  local parent_line = lines[start_line]
+  if not parent_line or not M.is_list_item(parent_line) then
+    return nil
+  end
+
+  local parent_indent = M.get_indent_level(parent_line)
+  local end_line = start_line
+
+  while end_line < #lines do
+    local next_line = lines[end_line + 1]
+
+    if M.is_blank_line(next_line) then
+      local probe_line = end_line + 2
+      while probe_line <= #lines and M.is_blank_line(lines[probe_line]) do
+        probe_line = probe_line + 1
+      end
+
+      if probe_line <= #lines and M.get_indent_level(lines[probe_line]) > parent_indent then
+        end_line = end_line + 1
+      else
+        break
+      end
+    elseif M.get_indent_level(next_line) > parent_indent then
+      end_line = end_line + 1
+    else
+      break
+    end
+  end
+
+  local block_lines = {}
+  for i = start_line, end_line do
+    table.insert(block_lines, lines[i])
+  end
+
+  return {
+    start_line = start_line,
+    end_line = end_line,
+    lines = block_lines,
+  }
+end
+
+function M.get_task_block_from_buffer(line_num)
+  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  return M.get_task_block_lines(lines, line_num)
+end
+
+-- Find the end of a category section
+function M.find_category_end(lines, category_line)
+  for i = category_line + 1, #lines do
+    if lines[i]:match(M.config.category_pattern) then
+      return i
+    end
+  end
+
+  return #lines + 1
+end
+
+function M.get_all_categories_from_lines(lines)
+  local categories = {}
+  local shortcuts = {}
+
+  for i, line in ipairs(lines) do
+    if M.is_category_heading(line) then
+      local category_name = M.get_category_name(line)
+      local shortcut = M.generate_category_shortcut(category_name, shortcuts)
+      shortcuts[shortcut] = true
+
+      table.insert(categories, {
+        name = category_name,
+        shortcut = shortcut,
+        line_num = i,
+        end_line = M.find_category_end(lines, i),
+      })
+    end
+  end
+
+  return categories
 end
 
 -- Check if a line is a category heading
@@ -322,27 +428,8 @@ end
 
 -- Get all categories from the entire buffer
 function M.get_all_categories()
-  local categories = {}
-  local shortcuts = {}
-
-  -- Get all lines in the buffer
   local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-
-  -- Find all category headings
-  for i, line in ipairs(lines) do
-    if M.is_category_heading(line) then
-      local category_name = M.get_category_name(line)
-      local shortcut = M.generate_category_shortcut(category_name, shortcuts)
-      shortcuts[shortcut] = true
-      table.insert(categories, {
-        name = category_name,
-        shortcut = shortcut,
-        line_num = i,
-      })
-    end
-  end
-
-  return categories
+  return M.get_all_categories_from_lines(lines)
 end
 
 -- Find the category of a given line
@@ -358,135 +445,117 @@ end
 
 -- Find sub-items for a given parent item
 function M.find_sub_items(parent_line_num)
-  local sub_items = {}
   local buffer_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-  local parent_line = buffer_lines[parent_line_num]
-  local parent_indent = M.get_indent_level(parent_line)
+  local block = M.get_task_block_lines(buffer_lines, parent_line_num)
 
-  -- Collect lines after the parent that are more indented
-  local i = parent_line_num + 1
-  while i <= #buffer_lines do
-    local line = buffer_lines[i]
-    local indent = M.get_indent_level(line)
+  if not block then
+    return {}
+  end
 
-    -- If we find a line with less or equal indentation, we're done
-    if indent <= parent_indent then
-      break
-    end
-
-    -- Add the sub-item exactly as is
+  local sub_items = {}
+  for i = block.start_line + 1, block.end_line do
     table.insert(sub_items, {
-      content = line,
-      line_num = i
+      content = buffer_lines[i],
+      line_num = i,
     })
-    i = i + 1
   end
 
   return sub_items
 end
 
--- Move a line and its sub-items from one category to another
+-- Move a line and its task block from one category to another
 function M.move_to_category(line, line_num, source_category, target_category)
-  -- Find any sub-items that should be moved with this line
-  local sub_items = M.find_sub_items(line_num)
+  local target_category_line = target_category and target_category.line_num
+  local start_line = line_num
 
-  -- Calculate how many lines we need to remove
-  local total_lines = 1 + #sub_items
-
-  -- Store the original lines exactly as they are before removal
-  local original_line = line
-  local original_sub_items = {}
-  for _, sub_item in ipairs(sub_items) do
-    table.insert(original_sub_items, sub_item.content)
+  if type(line) == "number" and not line_num then
+    start_line = line
   end
 
-  -- Get the list marker and content without priority
-  local indent, marker = M.get_list_marker(original_line)
-  local content = M.get_content(original_line)
-
-  -- Remove any existing priority tag
-  content = content:gsub("%s*%[p%d+%]%s*", " ")
-
-  -- Ensure content has no trailing whitespace
-  content = content:gsub("%s+$", "")
-
-  -- Format the line without priority, preserving markers and indentation
-  local line_without_priority
-  if marker ~= "" then
-    -- Strip trailing spaces from the marker to avoid duplicated spaces
-    marker = marker:gsub("%s+$", "")
-    -- Ensure there's exactly one space between marker and content
-    line_without_priority = indent .. marker .. " " .. content:gsub("^%s+", "")
-  else
-    line_without_priority = indent .. content:gsub("^%s+", "")
+  if not start_line or not target_category_line then
+    return nil
   end
 
-  -- Trim any excess whitespace in the final result
-  line_without_priority = line_without_priority:gsub("%s+$", "")
+  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  local block = M.get_task_block_lines(lines, start_line)
 
-  -- Delete the line and its sub-items from their current position
-  vim.api.nvim_buf_set_lines(0, line_num - 1, line_num - 1 + total_lines, true, {})
+  if not block then
+    return nil
+  end
 
-  -- Find the end of the target category
-  local target_end = nil
-  local buffer_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-
-  for i = target_category.line_num + 1, #buffer_lines do
-    if buffer_lines[i]:match(M.config.category_pattern) then
-      target_end = i
-      break
+  local block_lines = {}
+  for idx = block.start_line, block.end_line do
+    local block_line = lines[idx]
+    if idx == block.start_line then
+      block_line = M.strip_task_priority(block_line)
     end
+    table.insert(block_lines, block_line)
   end
 
-  target_end = target_end or #buffer_lines + 1
+  local adjusted_target = target_category_line
+  local block_len = block.end_line - block.start_line + 1
 
-  -- Prepare all lines to insert (parent line + sub-items)
-  local lines_to_insert = { line_without_priority }
-
-  -- Process sub-items one by one - we want to keep them exactly as they are
-  for _, sub_item_content in ipairs(original_sub_items) do
-    table.insert(lines_to_insert, sub_item_content)
+  if block.start_line < target_category_line then
+    adjusted_target = adjusted_target - block_len
   end
 
-  -- Insert the lines at the end of the target category
-  vim.api.nvim_buf_set_lines(0, target_end - 1, target_end - 1, true, lines_to_insert)
+  for i = block.end_line, block.start_line, -1 do
+    table.remove(lines, block.start_line)
+  end
 
-  -- Return the new line number of the parent item
-  return target_end - 1
+  if adjusted_target < 1 then
+    adjusted_target = 1
+  elseif adjusted_target > #lines + 1 then
+    adjusted_target = #lines + 1
+  end
+
+  local target_end = M.find_category_end(lines, adjusted_target)
+
+  for i = #block_lines, 1, -1 do
+    table.insert(lines, target_end, block_lines[i])
+  end
+
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
+
+  return target_end
 end
 
 -- Move a checked item to the bottom of its current section/category
 function M.move_item_to_section_bottom(line_num)
-  local buffer_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-  local line = buffer_lines[line_num]
+  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  local line = lines[line_num]
 
   if not line or M.is_markdown_heading(line) then
     return line_num
   end
 
-  local sub_items = M.find_sub_items(line_num)
-  local total_lines = 1 + #sub_items
-  local indent_level = M.get_indent_level(line)
-  local lines_to_move = { line }
-
-  for _, sub_item in ipairs(sub_items) do
-    table.insert(lines_to_move, sub_item.content)
+  local block = M.get_task_block_lines(lines, line_num)
+  if not block then
+    return line_num
   end
 
-  local buffer_len = #buffer_lines
-  local insert_pos
+  local lines_to_move = {}
+  for _, block_line in ipairs(block.lines) do
+    table.insert(lines_to_move, block_line)
+  end
 
-  if not M.is_sub_item(line) then
-    local search_start = math.min(line_num + total_lines, buffer_len + 1)
-    insert_pos = buffer_len + 1
+  for i = block.end_line, block.start_line, -1 do
+    table.remove(lines, block.start_line)
+  end
 
-    local _, section_level = M.find_enclosing_section_heading(line_num)
+  local line_to_move = lines_to_move[1]
+  local indent_level = M.get_indent_level(line_to_move)
+  local insert_pos = nil
+
+  if not M.is_sub_item(line_to_move) then
+    local section_level = select(2, M.find_enclosing_section_heading(block.start_line))
+
     if section_level then
-      -- Stop at the next heading of the same or higher level (e.g. ### not ##)
-      insert_pos = M.find_section_boundary(buffer_lines, search_start, section_level)
+      insert_pos = M.find_section_boundary(lines, block.start_line, section_level)
     else
-      for i = search_start, buffer_len do
-        if M.is_category_heading(buffer_lines[i]) then
+      insert_pos = #lines + 1
+      for i = block.start_line, #lines do
+        if M.is_category_heading(lines[i]) then
           insert_pos = i
           break
         end
@@ -494,18 +563,19 @@ function M.move_item_to_section_bottom(line_num)
     end
 
     local trim_end = insert_pos - 1
-    while trim_end >= search_start and buffer_lines[trim_end] and buffer_lines[trim_end]:match("^%s*$") do
+    while trim_end >= block.start_line and M.is_blank_line(lines[trim_end]) do
       insert_pos = trim_end
       trim_end = trim_end - 1
     end
   else
-    insert_pos = line_num + total_lines
+    insert_pos = block.start_line
     local i = insert_pos
+    local buffer_len = #lines
 
     while i <= buffer_len do
-      local current_line = buffer_lines[i]
+      local current_line = lines[i]
 
-      if not current_line or current_line:match("^%s*$") then
+      if not current_line or M.is_blank_line(current_line) then
         break
       end
 
@@ -520,8 +590,8 @@ function M.move_item_to_section_bottom(line_num)
 
         local j = i + 1
         while j <= buffer_len do
-          local next_line = buffer_lines[j]
-          if not next_line or next_line:match("^%s*$") then
+          local next_line = lines[j]
+          if not next_line or M.is_blank_line(next_line) then
             break
           end
 
@@ -541,18 +611,24 @@ function M.move_item_to_section_bottom(line_num)
     end
   end
 
-  local target_pre_remove = insert_pos - total_lines
-  if not insert_pos or target_pre_remove <= line_num then
+  if not insert_pos then
+    for _, line in ipairs(lines_to_move) do
+      table.insert(lines, line)
+    end
+  else
+    if insert_pos > #lines + 1 then
+      insert_pos = #lines + 1
+    end
+    for i = #lines_to_move, 1, -1 do
+      table.insert(lines, insert_pos, lines_to_move[i])
+    end
+  end
+
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
+
+  if not insert_pos then
     return line_num
   end
-
-  vim.api.nvim_buf_set_lines(0, line_num - 1, line_num - 1 + total_lines, true, {})
-
-  if insert_pos > line_num then
-    insert_pos = insert_pos - total_lines
-  end
-
-  vim.api.nvim_buf_set_lines(0, insert_pos - 1, insert_pos - 1, true, lines_to_move)
 
   return insert_pos
 end
@@ -726,7 +802,154 @@ end
 
 -- Check if a line has a checked checkbox
 function M.is_checked_item(line)
-  return line:match("^%s*%-%s+%[x%]") ~= nil
+  local analysis = analyze_checkbox_line(line)
+  if not analysis or not analysis.has_checkbox then
+    return false
+  end
+
+  return analysis.state:lower() == "x"
+end
+
+function M._apply_prioritize_changes(changes, original_start_line, original_end_line)
+  if not changes or (#changes.lines == 0 and #changes.moves == 0) then
+    return false
+  end
+
+  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  local move_blocks = {}
+
+  for i, move in ipairs(changes.moves) do
+    local block = M.get_task_block_lines(lines, move.from)
+    if block then
+      local block_lines = {}
+      for idx, block_line in ipairs(block.lines) do
+        if idx == 1 then
+          table.insert(block_lines, M.strip_task_priority(block_line))
+        else
+          table.insert(block_lines, block_line)
+        end
+      end
+
+      table.insert(move_blocks, {
+        from = block.start_line,
+        to = block.end_line,
+        len = #block_lines,
+        lines = block_lines,
+        order = i,
+        target_category_line = move.target_category and move.target_category.line_num,
+      })
+    end
+  end
+
+  table.sort(move_blocks, function(a, b)
+    return a.from > b.from
+  end)
+
+  for _, move in ipairs(move_blocks) do
+    for i = move.to, move.from, -1 do
+      table.remove(lines, move.from)
+    end
+  end
+
+  local adjusted_changes = {}
+  for _, change in ipairs(changes.lines) do
+    local line_num = change.line_num
+
+    for _, move in ipairs(move_blocks) do
+      if change.line_num > move.to then
+        line_num = line_num - move.len
+      end
+    end
+
+    table.insert(adjusted_changes, {
+      line_num = line_num,
+      content = change.content,
+    })
+  end
+
+  table.sort(adjusted_changes, function(a, b)
+    return a.line_num < b.line_num
+  end)
+
+  for _, change in ipairs(adjusted_changes) do
+    if change.line_num >= 1 and change.line_num <= #lines + 1 then
+      if change.line_num == #lines + 1 then
+        table.insert(lines, change.content)
+      else
+        lines[change.line_num] = change.content
+      end
+    end
+  end
+
+  local insertions = {}
+  for _, move in ipairs(move_blocks) do
+    local target_line = move.target_category_line
+    if target_line then
+      local adjusted_target_line = target_line
+      for _, removed in ipairs(move_blocks) do
+        if removed.from < target_line then
+          adjusted_target_line = adjusted_target_line - removed.len
+        end
+      end
+
+      local target_end = M.find_category_end(lines, adjusted_target_line)
+
+      table.insert(insertions, {
+        lines = move.lines,
+        len = move.len,
+        insert_pos = target_end,
+        order = move.order,
+      })
+    end
+  end
+
+  table.sort(insertions, function(a, b)
+    if a.insert_pos ~= b.insert_pos then
+      return a.insert_pos < b.insert_pos
+    end
+
+    return a.order < b.order
+  end)
+
+  local inserted = 0
+  for _, insertion in ipairs(insertions) do
+    local insert_pos = insertion.insert_pos + inserted
+    for i = insertion.len, 1, -1 do
+      table.insert(lines, insert_pos, insertion.lines[i])
+    end
+    inserted = inserted + insertion.len
+  end
+
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
+
+  local moved_lines = {}
+  for _, move in ipairs(changes.moves) do
+    moved_lines[move.from] = true
+  end
+
+  local new_start_line = nil
+  local new_end_line = nil
+  local lines_removed = 0
+
+  for line_num = original_start_line, original_end_line do
+    if moved_lines[line_num] then
+      lines_removed = lines_removed + 1
+    else
+      local adjusted_line_num = line_num - lines_removed
+      if new_start_line == nil then
+        new_start_line = adjusted_line_num
+      end
+      new_end_line = adjusted_line_num
+    end
+  end
+
+  if new_start_line and new_end_line and new_start_line <= new_end_line then
+    vim.fn.setpos("'<", {0, new_start_line, 1, 0})
+    vim.fn.setpos("'>", {0, new_end_line, vim.fn.col("$"), 0})
+    vim.cmd("normal! gv")
+  end
+
+  return true
 end
 
 -- Interactive prioritization of selected lines
@@ -748,7 +971,7 @@ function M.prioritize_selected(skip_prioritized)
   -- Store all pending changes
   local changes = {
     lines = {}, -- {line_num = N, content = "new content"}
-    moves = {}, -- {from = N, to = M, content = "content", sub_items = {...}}
+    moves = {}, -- {from = N, target_category = {...}}
   }
 
   -- Display category shortcuts only if categories exist
@@ -767,7 +990,7 @@ function M.prioritize_selected(skip_prioritized)
 
   -- Get the current visual selection
   local start_line = vim.fn.line("'<")
-  local end_line = vim.fn.line("'>")
+  local end_line = vim.fn.line(">'")
 
   -- Determine the baseline indentation for the selection
   local selection_lines = vim.api.nvim_buf_get_lines(0, start_line - 1, end_line, true)
@@ -777,7 +1000,6 @@ function M.prioritize_selected(skip_prioritized)
   local lines = {}
   for i = start_line, end_line do
     local line = vim.fn.getline(i)
-    -- Skip checked items
     if not M.is_checked_item(line) then
       table.insert(lines, {
         content = line,
@@ -807,213 +1029,92 @@ function M.prioritize_selected(skip_prioritized)
     -- Skip category headings and sub-items
     if M.is_category_heading(line) or M.is_sub_item(line, base_indent) then
       i = i + 1
-      goto continue
-    end
+    else
+      local current_priority = M.get_priority(line)
 
-    local current_priority = M.get_priority(line)
+      -- Skip already prioritized items if requested
+      if not (skip_prioritized and current_priority) then
+        processed_lines = processed_lines + 1
 
-    -- Skip already prioritized items if requested
-    if not (skip_prioritized and current_priority) then
-      processed_lines = processed_lines + 1
-      -- Find the current category for this line
-      local current_category = has_categories and M.find_line_category(line_num, categories) or nil
+        -- Find the current category for this line
+        local current_category = has_categories and M.find_line_category(line_num, categories) or nil
 
-      -- Calculate progress percentage
-      local progress = math.floor((processed_lines / total_lines) * 100)
+        -- Calculate progress percentage
+        local progress = total_lines == 0 and 0 or math.floor((processed_lines / total_lines) * 100)
 
-      -- Prompt for priority or category change
-      local prompt = string.format("Line %d (%d%%)", line_num, progress)
-      if current_category then
-        prompt = prompt .. string.format(" (in %s)", current_category.name)
-      end
-      prompt = prompt .. ": "
+        -- Prompt for priority or category change
+        local prompt = string.format("Line %d (%d%%)", line_num, progress)
+        if current_category then
+          prompt = prompt .. string.format(" (in %s)", current_category.name)
+        end
+        prompt = prompt .. ": "
 
-      -- Get the line content without priority for display
-      local display_line = line:gsub("%s*%[p%d+%]%s*", " "):gsub("^%s+", "")
+        -- Get the line content without priority for display
+        local display_line = M.strip_task_priority(line):gsub("^%s+", "")
 
-      vim.api.nvim_echo({
-        { prompt,                "Question" },
-        { display_line, "Normal" }
-      }, true, {})
+        vim.api.nvim_echo({
+          { prompt,                "Question" },
+          { display_line, "Normal" }
+        }, true, {})
 
-      local char = vim.fn.getchar()
-      local input = char == 27 and "q" or vim.fn.nr2char(char)
+        local char = vim.fn.getchar()
+        local input = char == 27 and "q" or vim.fn.nr2char(char)
 
-      -- Process input
-      if input == "q" then
-        -- If there are pending changes, ask for confirmation
-        if #changes.lines > 0 or #changes.moves > 0 then
-          vim.api.nvim_echo({
-            { "You have pending changes. Apply them? (y/n): ", "Question" }
-          }, true, {})
-          
-          local confirm_char = vim.fn.getchar()
-          local confirm_input = confirm_char == 27 and "n" or vim.fn.nr2char(confirm_char)
-          
-          if confirm_input == "y" then
-            -- Apply changes and return
-            if #changes.lines > 0 or #changes.moves > 0 then
-              -- Track which lines were moved away to calculate new selection
-              local moved_lines = {}
-              for _, move in ipairs(changes.moves) do
-                moved_lines[move.from] = true
-              end
+        -- Process input
+        if input == "q" then
+          if #changes.lines > 0 or #changes.moves > 0 then
+            vim.api.nvim_echo({
+              { "You have pending changes. Apply them? (y/n): ", "Question" }
+            }, true, {})
 
-              -- First apply all moves (from bottom to top to preserve line numbers)
-              table.sort(changes.moves, function(a, b) return a.from > b.from end)
-              for _, move in ipairs(changes.moves) do
-                local new_line_num = M.move_to_category(move.content, move.from, nil, {
-                  line_num = move.target_category.line_num,
-                  name = move.target_category.name
-                })
-                
-                -- Update any pending line changes that were after this move
-                for _, change in ipairs(changes.lines) do
-                  if change.line_num > move.from then
-                    change.line_num = change.line_num - 1
-                  end
-                end
-              end
+            local confirm_char = vim.fn.getchar()
+            local confirm_input = confirm_char == 27 and "n" or vim.fn.nr2char(confirm_char)
 
-              -- Then apply all line changes
-              for _, change in ipairs(changes.lines) do
-                vim.api.nvim_buf_set_lines(0, change.line_num - 1, change.line_num, true, { change.content })
-              end
-
-              -- Calculate new selection range for lines that weren't moved
-              local new_start_line = nil
-              local new_end_line = nil
-              local lines_removed = 0
-              
-              for line_num = original_start_line, original_end_line do
-                if moved_lines[line_num] then
-                  lines_removed = lines_removed + 1
-                else
-                  -- This line wasn't moved, include it in the new selection
-                  local adjusted_line_num = line_num - lines_removed
-                  if new_start_line == nil then
-                    new_start_line = adjusted_line_num
-                  end
-                  new_end_line = adjusted_line_num
-                end
-              end
-
-              -- Restore visual selection for lines that weren't moved
-              if new_start_line and new_end_line and new_start_line <= new_end_line then
-                vim.fn.setpos("'<", {0, new_start_line, 1, 0})
-                vim.fn.setpos("'>", {0, new_end_line, vim.fn.col("$"), 0})
-                
-                -- Enter visual line mode to show the selection
-                vim.cmd("normal! gv")
-              end
-
+            if confirm_input == "y" then
+              M._apply_prioritize_changes(changes, original_start_line, original_end_line)
               vim.api.nvim_echo({ { "Changes applied", "Normal" } }, true, {})
+              return
             end
-            return
-          else
-            -- Cancel all changes
+
             vim.api.nvim_echo({ { "Operation cancelled", "WarningMsg" } }, true, {})
             return
           end
-        else
-          -- No pending changes, just return
+
           vim.api.nvim_echo({ { "Operation cancelled", "WarningMsg" } }, true, {})
           return
-        end
-      elseif input == "s" then
-        -- Skip this item
-        vim.api.nvim_echo({ { "Skipped", "Normal" } }, true, {})
-      elseif input:match("[1-9]") then
-        -- Queue priority change
-        local priority = tonumber(input)
-        local new_line = M.format_with_priority(line, priority, base_indent)
-        table.insert(changes.lines, {
-          line_num = line_num,
-          content = new_line
-        })
-      elseif has_categories and shortcut_map[input] then
-        -- Queue category move
-        local target_category = shortcut_map[input]
-        if current_category and current_category.name ~= target_category.name then
-          -- Find sub-items
-          local sub_items = M.find_sub_items(line_num)
-          
-          -- Queue the move with the full target category info
-          table.insert(changes.moves, {
-            from = line_num,
-            target_category = target_category,  -- Store the full category object
-            content = line,
-            sub_items = sub_items
+        elseif input == "s" then
+          -- Skip this item
+          vim.api.nvim_echo({ { "Skipped", "Normal" } }, true, {})
+        elseif input:match("[1-9]") then
+          -- Queue priority change
+          local priority = tonumber(input)
+          local new_line = M.format_with_priority(line, priority, base_indent)
+          table.insert(changes.lines, {
+            line_num = line_num,
+            content = new_line
           })
+        elseif has_categories and shortcut_map[input] then
+          -- Queue category move
+          local target_category = shortcut_map[input]
+          if current_category and current_category.name ~= target_category.name then
+            table.insert(changes.moves, {
+              from = line_num,
+              target_category = target_category,
+            })
 
-          -- Notify about pending move
-          vim.api.nvim_echo({
-            { string.format("Will move to %s", target_category.name), "Normal" }
-          }, true, {})
+            vim.api.nvim_echo({
+              { string.format("Will move to %s", target_category.name), "Normal" }
+            }, true, {})
+          end
         end
       end
     end
 
     i = i + 1
-    ::continue::
   end
 
-  -- Apply all changes
   if #changes.lines > 0 or #changes.moves > 0 then
-    -- Track which lines were moved away to calculate new selection
-    local moved_lines = {}
-    for _, move in ipairs(changes.moves) do
-      moved_lines[move.from] = true
-    end
-
-    -- First apply all moves (from bottom to top to preserve line numbers)
-    table.sort(changes.moves, function(a, b) return a.from > b.from end)
-    for _, move in ipairs(changes.moves) do
-      local new_line_num = M.move_to_category(move.content, move.from, nil, {
-        line_num = move.target_category.line_num,
-        name = move.target_category.name
-      })
-      
-      -- Update any pending line changes that were after this move
-      for _, change in ipairs(changes.lines) do
-        if change.line_num > move.from then
-          change.line_num = change.line_num - 1
-        end
-      end
-    end
-
-    -- Then apply all line changes
-    for _, change in ipairs(changes.lines) do
-      vim.api.nvim_buf_set_lines(0, change.line_num - 1, change.line_num, true, { change.content })
-    end
-
-    -- Calculate new selection range for lines that weren't moved
-    local new_start_line = nil
-    local new_end_line = nil
-    local lines_removed = 0
-    
-    for line_num = original_start_line, original_end_line do
-      if moved_lines[line_num] then
-        lines_removed = lines_removed + 1
-      else
-        -- This line wasn't moved, include it in the new selection
-        local adjusted_line_num = line_num - lines_removed
-        if new_start_line == nil then
-          new_start_line = adjusted_line_num
-        end
-        new_end_line = adjusted_line_num
-      end
-    end
-
-    -- Restore visual selection for lines that weren't moved
-    if new_start_line and new_end_line and new_start_line <= new_end_line then
-      vim.fn.setpos("'<", {0, new_start_line, 1, 0})
-      vim.fn.setpos("'>", {0, new_end_line, vim.fn.col("$"), 0})
-      
-      -- Enter visual line mode to show the selection
-      vim.cmd("normal! gv")
-    end
-
+    M._apply_prioritize_changes(changes, original_start_line, original_end_line)
     vim.api.nvim_echo({ { "All changes applied", "Normal" } }, true, {})
   else
     vim.api.nvim_echo({ { "No changes made", "Normal" } }, true, {})
@@ -1035,142 +1136,116 @@ function M.sort_by_priority()
   -- Identify contiguous blocks of lines within the same category
   local blocks = {}
   local current_block = nil
-  local current_category = nil
 
   for i, line in ipairs(lines) do
-    local absolute_line_num = start_line + i - 1
-
     if M.is_category_heading(line) then
-      -- Start a new block for the category heading
       if current_block then
         table.insert(blocks, current_block)
       end
 
-      current_category = M.get_category_name(line)
       current_block = {
-        category = current_category,
-        start_line = i,
+        category = M.get_category_name(line),
         lines = { line }
       }
     elseif current_block then
-      -- Add line to the current block
       table.insert(current_block.lines, line)
     else
-      -- Line is before any category - create a block for it
-      local line_category = M.find_line_category(absolute_line_num, categories)
+      local line_category = M.find_line_category(start_line + i - 1, categories)
       local category_name = line_category and line_category.name or "Uncategorized"
 
       current_block = {
         category = category_name,
-        start_line = i,
         lines = { line }
       }
     end
   end
 
-  -- Add the last block
   if current_block then
     table.insert(blocks, current_block)
   end
 
-  -- For each block, sort the lines by priority (but keep heading at the top)
   for _, block in ipairs(blocks) do
     if #block.lines > 1 then
-      -- Separate category heading if present
       local heading = nil
       if M.is_category_heading(block.lines[1]) then
         heading = table.remove(block.lines, 1)
       end
 
       local base_indent = M.get_base_indent(block.lines)
-
-      -- Group parent items with their sub-items
       local item_groups = {}
       local i = 1
 
       while i <= #block.lines do
         local line = block.lines[i]
-        local is_heading = M.is_category_heading(line)
-        local is_sub = M.is_sub_item(line, base_indent)
-        local is_checked = M.is_checked_item(line)
-
-        if is_heading or is_sub then
-          -- Skip headings and sub-items (we handle them as part of parent items)
+        if M.is_sub_item(line, base_indent) then
           i = i + 1
         else
-          -- This is a parent item - find all its sub-items
-          local parent_indent = M.get_indent_level(line)
-          local group = {
-            parent = {
-              line = line,
-              priority = M.get_priority(line),
+          local block_data = M.get_task_block_lines(block.lines, i)
+
+          if block_data and block_data.start_line == i then
+            local lines_to_sort = {}
+            for block_idx = block_data.start_line, block_data.end_line do
+              table.insert(lines_to_sort, block.lines[block_idx])
+            end
+
+            table.insert(item_groups, {
+              lines = lines_to_sort,
               original_pos = i,
-              is_checked = is_checked
-            },
-            sub_items = {}
-          }
+              is_checked = M.is_checked_item(lines_to_sort[1]),
+              priority = M.get_priority(lines_to_sort[1])
+            })
 
-          -- Collect sub-items
-          local j = i + 1
-          while j <= #block.lines and M.is_sub_item(block.lines[j], parent_indent) do
-            table.insert(group.sub_items, block.lines[j])
-            j = j + 1
+            i = block_data.end_line + 1
+          else
+            table.insert(item_groups, {
+              lines = { line },
+              original_pos = i,
+              is_checked = M.is_checked_item(line),
+              priority = M.is_list_item(line) and M.get_priority(line) or nil,
+            })
+            i = i + 1
           end
-
-          table.insert(item_groups, group)
-          i = j -- Skip past the sub-items
         end
       end
 
-      -- Sort the groups by parent priority (stable sort)
       table.sort(item_groups, function(a, b)
-        -- Move checked items to the bottom
-        if a.parent.is_checked ~= b.parent.is_checked then
-          return not a.parent.is_checked
+        if a.is_checked ~= b.is_checked then
+          return not a.is_checked
         end
 
-        -- Both have priorities
-        if a.parent.priority and b.parent.priority then
-          if a.parent.priority ~= b.parent.priority then
-            return a.parent.priority < b.parent.priority
+        if a.priority and b.priority then
+          if a.priority ~= b.priority then
+            return a.priority < b.priority
           end
-          -- Same priority - maintain original order
-          return a.parent.original_pos < b.parent.original_pos
+          return a.original_pos < b.original_pos
         end
 
-        -- Only a has priority
-        if a.parent.priority and not b.parent.priority then
+        if a.priority and not b.priority then
           return true
         end
 
-        -- Only b has priority
-        if not a.parent.priority and b.parent.priority then
+        if not a.priority and b.priority then
           return false
         end
 
-        -- Neither has priority - maintain original order
-        return a.parent.original_pos < b.parent.original_pos
+        return a.original_pos < b.original_pos
       end)
 
-      -- Flatten the sorted groups back into lines
       local sorted_lines = {}
-      for _, group in ipairs(item_groups) do
-        table.insert(sorted_lines, group.parent.line)
-        for _, sub_item in ipairs(group.sub_items) do
-          table.insert(sorted_lines, sub_item)
+      for _, item_group in ipairs(item_groups) do
+        for _, item_line in ipairs(item_group.lines) do
+          table.insert(sorted_lines, item_line)
         end
       end
 
-      block.lines = sorted_lines
-
-      -- Put the heading back
       if heading then
-        table.insert(block.lines, 1, heading)
+        table.insert(sorted_lines, 1, heading)
       end
+
+      block.lines = sorted_lines
     end
   end
 
-  -- Reconstruct the sorted lines
   local sorted_lines = {}
   for _, block in ipairs(blocks) do
     for _, line in ipairs(block.lines) do
@@ -1178,13 +1253,12 @@ function M.sort_by_priority()
     end
   end
 
-  -- Replace the lines in the buffer
   vim.api.nvim_buf_set_lines(0, start_line - 1, end_line, true, sorted_lines)
 
   -- Restore visual selection to keep the sorted lines selected
   vim.fn.setpos("'<", {0, start_line, 1, 0})
   vim.fn.setpos("'>", {0, start_line + #sorted_lines - 1, vim.fn.col("$"), 0})
-  
+
   -- Enter visual line mode to show the selection
   vim.cmd("normal! gv")
 

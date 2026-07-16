@@ -1,6 +1,6 @@
 # Todo Priority Manager for Neovim
 
-A Neovim plugin that helps manage, prioritize, and categorize to-do items in your Markdown lists.
+A Neovim plugin that helps manage, prioritize, and categorize todo items in your Markdown lists.
 
 ## Features
 
@@ -71,7 +71,7 @@ require('task-manager').setup({
     prioritize_all = "ta",      -- (t)odo (a)ll prioritize
     prioritize_new = "tn",      -- (t)odo (n)ew prioritize
     sort_by_priority = "ts",    -- (t)odo (s)ort
-    toggle_checkbox = "tx",     -- (t)odo (x) checkbox toggle
+    toggle_checkbox = "tx",  -- (t)odo (x) checkbox toggle
   },
 
   -- Category heading pattern (Markdown h2)
@@ -79,6 +79,16 @@ require('task-manager').setup({
 
   -- Debug mode (prints additional information)
   debug = false
+})
+```
+
+The keybindings table is merged deeply so partial overrides work:
+
+```lua
+require('task-manager').setup({
+  keybindings = {
+    prioritize_new = "tp" -- Only override one keybinding
+  }
 })
 ```
 
@@ -108,7 +118,7 @@ The plugin expects your to-do list to be organized with Markdown headings as cat
 
 - `<leader>ta` - Prioritize all selected items (reprioritize everything)
 - `<leader>tn` - Prioritize only new items (skip already prioritized items)
-- `<leader>ts` - Sort selected items by priority (stable sort within each category, checked items at bottom)
+- `<leader>ts` - Sort selected items by priority (checked items at bottom)
 - `<leader>tx` - Toggle checkbox state (works in both normal and visual mode)
 
 ### Prioritization Process
@@ -184,6 +194,16 @@ If a line doesn't have a checkbox, pressing `<leader>tx` will add one in the che
 
 When you toggle a checkbox from unchecked (`[ ]`) to checked (`[x]`), the task is automatically moved to the bottom of its current **heading section** (from the nearest `#` heading above through content at that level; the next heading of the same or higher level ends the section). For example, a task under `### Meeting` stays within that subsection, not the whole `## Work` block. Sub-items and nested list siblings are unchanged. Completed items stay out of the way while preserving hierarchy.
 
+### Testing
+
+Run the regression harness with:
+
+```sh
+nvim --headless --clean -u NONE -U NONE -n -l tests/run.lua
+```
+
+The suite validates parsing, category moves, sorting, checkbox handling, and configuration overrides.
+
 ## File Structure
 
 Place the plugin in your Neovim configuration directory:
@@ -196,10 +216,10 @@ Or if you're packaging it as a proper plugin:
 
 ```
 ~/.config/nvim/
-└── lua/
-    └── task-manager/
-        ├── init.lua
-        └── README.md
+├── lua/
+└── task-manager/
+    ├── init.lua
+    └── README.md
 ```
 
 ## TODO
