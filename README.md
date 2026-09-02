@@ -197,7 +197,7 @@ The plugin provides a convenient way to toggle task checkboxes:
 
 If a line doesn't have a checkbox, pressing `<leader>tx` will add one in the checked state (`[x]`).
 
-When you toggle a checkbox from unchecked (`[ ]`) to checked (`[x]`), the task is automatically moved to the bottom of its current **heading section** (from the nearest `#` heading above through content at that level; the next heading of the same or higher level ends the section). For example, a task under `### Meeting` stays within that subsection, not the whole `## Work` block. Sub-items and nested list siblings are unchanged. Completed items stay out of the way while preserving hierarchy.
+When you toggle a checkbox from unchecked (`[ ]`) to checked (`[x]`), the task is automatically moved to the bottom of its current **heading section** — the content under the nearest heading above, stopping before the next heading of any level. Nested subsections are not skipped: a task under `## Work` that sits above `### Meeting` moves to just before that `###`, not past all nested headings. A task under `### Meeting` stays within that subsection. Sub-items and nested list siblings are unchanged.
 
 ### Testing
 

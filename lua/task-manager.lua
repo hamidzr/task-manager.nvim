@@ -93,13 +93,14 @@ function M.find_enclosing_section_heading(line_num)
   return nil, nil
 end
 
--- Line index of the next same-or-higher-level heading after from_line
-function M.find_section_boundary(buffer_lines, from_line, section_level)
+-- Line index of the next heading after from_line (any level).
+-- Stops at nested subsections too, so a checked item under ## sits
+-- before the first ### rather than after all nested headings.
+function M.find_section_boundary(buffer_lines, from_line)
   local buffer_len = #buffer_lines
 
   for i = from_line, buffer_len do
-    local level = M.get_markdown_heading_level(buffer_lines[i])
-    if level and level <= section_level then
+    if M.get_markdown_heading_level(buffer_lines[i]) then
       return i
     end
   end
@@ -574,10 +575,10 @@ function M.move_item_to_section_bottom(line_num)
   local insert_pos = nil
 
   if not M.is_sub_item(line_to_move) then
-    local section_level = select(2, M.find_enclosing_section_heading(block.start_line))
+    local section_heading = M.find_enclosing_section_heading(block.start_line)
 
-    if section_level then
-      insert_pos = M.find_section_boundary(lines, block.start_line, section_level)
+    if section_heading then
+      insert_pos = M.find_section_boundary(lines, block.start_line)
     else
       insert_pos = #lines + 1
       for i = block.start_line, #lines do

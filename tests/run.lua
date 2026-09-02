@@ -427,6 +427,56 @@ run_test("move checked block to section bottom keeps descendants", function()
   })
 end)
 
+run_test("checked move under h2 stops before nested h3", function()
+  local out = with_buffer({
+    "## Work",
+    "- [ ] alpha",
+    "- [ ] beta",
+    "### Meeting",
+    "- [ ] gamma",
+    "## Other",
+  }, function()
+    vim.api.nvim_buf_set_option(0, "filetype", "markdown")
+    tm.move_item_to_section_bottom(2)
+  end)
+
+  assert_lines("h2 checked item before nested h3", out, {
+    "## Work",
+    "- [ ] beta",
+    "- [ ] alpha",
+    "### Meeting",
+    "- [ ] gamma",
+    "## Other",
+  })
+end)
+
+run_test("checked move under h3 stays inside that subsection", function()
+  local out = with_buffer({
+    "## Work",
+    "- [ ] alpha",
+    "### Meeting",
+    "- [ ] gamma",
+    "- [ ] delta",
+    "### Notes",
+    "- [ ] epsilon",
+    "## Other",
+  }, function()
+    vim.api.nvim_buf_set_option(0, "filetype", "markdown")
+    tm.move_item_to_section_bottom(4)
+  end)
+
+  assert_lines("h3 checked item before next heading", out, {
+    "## Work",
+    "- [ ] alpha",
+    "### Meeting",
+    "- [ ] delta",
+    "- [ ] gamma",
+    "### Notes",
+    "- [ ] epsilon",
+    "## Other",
+  })
+end)
+
 if failures > 0 then
   print("FAILED: " .. failures .. " test(s)")
   os.exit(1)
