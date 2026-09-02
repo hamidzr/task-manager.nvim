@@ -77,6 +77,9 @@ require('task-manager').setup({
   -- Category heading pattern (Markdown h2)
   category_pattern = "^%s*##%s+(.+)$",
 
+  -- Sort selection automatically after triage changes are applied
+  auto_sort = true,
+
   -- Debug mode (prints additional information)
   debug = false
 })
@@ -128,6 +131,7 @@ When you initiate prioritization:
 1. The plugin will display a table of categories and their auto-generated shortcuts
 2. For each line, you'll be prompted to:
    - Enter a number (1-9) to set a priority
+   - Press `0` to clear an existing priority
    - Enter a category shortcut to move the task to another category
    - Press 's' to skip the current item
    - Press 'q' to quit the process
@@ -135,6 +139,7 @@ When you initiate prioritization:
    - You'll be prompted to apply or discard the changes
    - Changes include both priority updates and category moves
    - All changes are applied atomically (all or nothing)
+4. When `auto_sort` is enabled (default), the selection is sorted by priority after changes are applied
 
 ### Sorting Behavior
 
@@ -171,8 +176,8 @@ After sorting (`ts`):
 ## Work
 
 - [p1] Prepare for meeting
-  - [p2] Prepare slides
   - [x] Review agenda
+  - [p2] Prepare slides
 - [x] Fix bug in login form
 
 ## Personal
@@ -223,7 +228,7 @@ Or if you're packaging it as a proper plugin:
 ```
 
 ## TODO
-- remove priorities
+- [x] remove priorities
 - [x] tx to also work in visual mode and over many lines
 - [x] ts and ta to ignore [x] items. sort at the bottom
 - [ ] highlight the same lines (or reduced set because of the moves) after changes
