@@ -1059,6 +1059,9 @@ function M.prioritize_selected(skip_prioritized)
         if current_category then
           prompt = prompt .. string.format(" (in %s)", current_category.name)
         end
+        if current_priority then
+          prompt = prompt .. string.format(" (was p%d)", current_priority)
+        end
         prompt = prompt .. ": "
 
         -- Get the line content without priority for display
