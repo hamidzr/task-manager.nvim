@@ -198,6 +198,88 @@ run_test("sort keeps descendant blocks and checked items", function()
   })
 end)
 
+run_test("apply returns adjusted selection after partial move", function()
+  local _, result = with_buffer({
+    "## A",
+    "- one",
+    "- two",
+    "## B",
+  }, function()
+    local changes = {
+      lines = {},
+      moves = {
+        { from = 3, target_category = { line_num = 4, name = "B" } },
+      },
+    }
+    return tm._apply_prioritize_changes(changes, 2, 3)
+  end)
+
+  assert_eq("selection start", result.selection_start, 2)
+  assert_eq("selection end", result.selection_end, 2)
+  assert_eq("moved category", result.moved_category_names[1], "B")
+end)
+
+run_test("auto sort uses adjusted selection after apply", function()
+  reset_config()
+  tm.config.auto_sort = true
+
+  local out = with_buffer({
+    "## A",
+    "- [p2] second",
+    "- [p1] first",
+  }, function()
+    local apply_result = tm._apply_prioritize_changes({
+      lines = {
+        { line_num = 2, content = "- [p1] second" },
+        { line_num = 3, content = "- [p2] first" },
+      },
+      moves = {},
+    }, 2, 3)
+    tm.maybe_sort_after_prioritize(apply_result)
+  end)
+
+  assert_lines("adjusted_selection_sort", out, {
+    "## A",
+    "- [p1] second",
+    "- [p2] first",
+  })
+
+  reset_config()
+end)
+
+run_test("auto sort includes moved tasks in destination category", function()
+  reset_config()
+  tm.config.auto_sort = true
+
+  local out = with_buffer({
+    "## A",
+    "- move me",
+    "- [p1] stay",
+    "## B",
+    "- [p3] existing",
+    "- plain",
+  }, function()
+    local apply_result = tm._apply_prioritize_changes({
+      lines = {},
+      moves = {
+        { from = 2, target_category = { line_num = 4, name = "B" } },
+      },
+    }, 2, 3)
+    tm.maybe_sort_after_prioritize(apply_result)
+  end)
+
+  assert_lines("destination_category_sort", out, {
+    "## A",
+    "- [p1] stay",
+    "## B",
+    "- [p3] existing",
+    "- plain",
+    "- move me",
+  })
+
+  reset_config()
+end)
+
 run_test("sort preserves orphan sub-items in partial selection", function()
   local out = with_buffer({
     "## A",

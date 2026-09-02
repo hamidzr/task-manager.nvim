@@ -828,7 +828,14 @@ end
 
 function M._apply_prioritize_changes(changes, original_start_line, original_end_line)
   if not changes or (#changes.lines == 0 and #changes.moves == 0) then
-    return false
+    return nil
+  end
+
+  local moved_category_names = {}
+  for _, move in ipairs(changes.moves) do
+    if move.target_category and move.target_category.name then
+      moved_category_names[move.target_category.name] = true
+    end
   end
 
   local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
@@ -965,17 +972,56 @@ function M._apply_prioritize_changes(changes, original_start_line, original_end_
     vim.cmd("normal! gv")
   end
 
-  return true
+  local moved_names = {}
+  for name in pairs(moved_category_names) do
+    table.insert(moved_names, name)
+  end
+  table.sort(moved_names)
+
+  return {
+    selection_start = new_start_line,
+    selection_end = new_end_line,
+    moved_category_names = moved_names,
+  }
 end
 
-function M.maybe_sort_after_prioritize(original_start_line, original_end_line)
-  if not M.config.auto_sort then
+function M.maybe_sort_after_prioritize(apply_result)
+  if not M.config.auto_sort or not apply_result then
     return
   end
 
-  vim.fn.setpos("'<", { 0, original_start_line, 1, 0 })
-  vim.fn.setpos("'>", { 0, original_end_line, vim.fn.col("$"), 0 })
-  M.sort_by_priority()
+  local sort_opts = { silent = true, restore_selection = false }
+  local sorted_category_lines = {}
+
+  if apply_result.selection_start
+      and apply_result.selection_end
+      and apply_result.selection_start <= apply_result.selection_end then
+    M.sort_line_range(apply_result.selection_start, apply_result.selection_end, sort_opts)
+  end
+
+  if #apply_result.moved_category_names > 0 then
+    local categories = M.get_all_categories()
+    for _, name in ipairs(apply_result.moved_category_names) do
+      for _, cat in ipairs(categories) do
+        if cat.name == name and not sorted_category_lines[cat.line_num] then
+          sorted_category_lines[cat.line_num] = true
+          local buffer_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+          local end_line = M.find_category_end(buffer_lines, cat.line_num) - 1
+          if end_line >= cat.line_num then
+            M.sort_line_range(cat.line_num, end_line, sort_opts)
+          end
+        end
+      end
+    end
+  end
+
+  if apply_result.selection_start
+      and apply_result.selection_end
+      and apply_result.selection_start <= apply_result.selection_end then
+    vim.fn.setpos("'<", { 0, apply_result.selection_start, 1, 0 })
+    vim.fn.setpos("'>", { 0, apply_result.selection_end, vim.fn.col("$"), 0 })
+    vim.cmd("normal! gv")
+  end
 end
 
 -- Interactive prioritization of selected lines
@@ -1102,8 +1148,8 @@ function M.prioritize_selected(skip_prioritized)
             local confirm_input = confirm_char == 27 and "n" or vim.fn.nr2char(confirm_char)
 
             if confirm_input == "y" then
-              M._apply_prioritize_changes(changes, original_start_line, original_end_line)
-              M.maybe_sort_after_prioritize(original_start_line, original_end_line)
+              local apply_result = M._apply_prioritize_changes(changes, original_start_line, original_end_line)
+              M.maybe_sort_after_prioritize(apply_result)
               vim.api.nvim_echo({ { "Changes applied", "Normal" } }, true, {})
               return
             end
@@ -1118,12 +1164,16 @@ function M.prioritize_selected(skip_prioritized)
           -- Skip this item
           vim.api.nvim_echo({ { "Skipped", "Normal" } }, true, {})
         elseif input == "0" then
-          local new_line = M.strip_task_priority(line)
-          table.insert(changes.lines, {
-            line_num = line_num,
-            content = new_line
-          })
-          vim.api.nvim_echo({ { "Priority cleared", "Normal" } }, true, {})
+          if current_priority then
+            local new_line = M.strip_task_priority(line)
+            table.insert(changes.lines, {
+              line_num = line_num,
+              content = new_line
+            })
+            vim.api.nvim_echo({ { "Priority cleared", "Normal" } }, true, {})
+          else
+            vim.api.nvim_echo({ { "No priority to clear", "Normal" } }, true, {})
+          end
         elseif input:match("[1-9]") then
           -- Queue priority change
           local priority = tonumber(input)
@@ -1153,19 +1203,21 @@ function M.prioritize_selected(skip_prioritized)
   end
 
   if #changes.lines > 0 or #changes.moves > 0 then
-    M._apply_prioritize_changes(changes, original_start_line, original_end_line)
-    M.maybe_sort_after_prioritize(original_start_line, original_end_line)
+    local apply_result = M._apply_prioritize_changes(changes, original_start_line, original_end_line)
+    M.maybe_sort_after_prioritize(apply_result)
     vim.api.nvim_echo({ { "All changes applied", "Normal" } }, true, {})
   else
     vim.api.nvim_echo({ { "No changes made", "Normal" } }, true, {})
   end
 end
 
--- Sort selected lines by priority (stable sort within categories)
-function M.sort_by_priority()
-  -- Get the current visual selection
-  local start_line = vim.fn.line("'<")
-  local end_line = vim.fn.line("'>")
+-- Sort a line range by priority (stable sort within categories)
+function M.sort_line_range(start_line, end_line, opts)
+  opts = opts or {}
+
+  if not start_line or not end_line or start_line > end_line then
+    return
+  end
 
   -- Get all categories
   local categories = M.get_all_categories()
@@ -1301,15 +1353,24 @@ function M.sort_by_priority()
 
   vim.api.nvim_buf_set_lines(0, start_line - 1, end_line, true, sorted_lines)
 
-  -- Restore visual selection to keep the sorted lines selected
-  vim.fn.setpos("'<", {0, start_line, 1, 0})
-  vim.fn.setpos("'>", {0, start_line + #sorted_lines - 1, vim.fn.col("$"), 0})
+  local selection_end = start_line + #sorted_lines - 1
 
-  -- Enter visual line mode to show the selection
-  vim.cmd("normal! gv")
+  if opts.restore_selection ~= false then
+    vim.fn.setpos("'<", { 0, start_line, 1, 0 })
+    vim.fn.setpos("'>", { 0, selection_end, vim.fn.col("$"), 0 })
+    vim.cmd("normal! gv")
+  end
 
-  -- Notify the user that the operation is complete
-  vim.api.nvim_echo({ { "Sorting complete", "Normal" } }, true, {})
+  if not opts.silent then
+    vim.api.nvim_echo({ { "Sorting complete", "Normal" } }, true, {})
+  end
+end
+
+-- Sort selected lines by priority (stable sort within categories)
+function M.sort_by_priority()
+  local start_line = vim.fn.line("'<")
+  local end_line = vim.fn.line("'>")
+  M.sort_line_range(start_line, end_line, { silent = false, restore_selection = true })
 end
 
 return M
