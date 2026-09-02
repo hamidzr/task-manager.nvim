@@ -379,6 +379,33 @@ run_test("custom priority pattern and formats", function()
   reset_config()
 end)
 
+run_test("get_visual_line_range uses visual marks", function()
+  with_buffer({ "- one", "- two", "- three" }, function()
+    vim.fn.setpos("'<", { 0, 1, 1, 0 })
+    vim.fn.setpos("'>", { 0, 3, 1, 0 })
+
+    local start_line, end_line = tm.get_visual_line_range()
+    assert_eq("marked start", start_line, 1)
+    assert_eq("marked end", end_line, 3)
+  end)
+
+  with_buffer({ "- one" }, function()
+    vim.fn.setpos("'<", { 0, 0, 0, 0 })
+    vim.fn.setpos("'>", { 0, 0, 0, 0 })
+    local start_line, end_line = tm.get_visual_line_range()
+    assert_eq("missing marks", start_line, nil)
+    assert_eq("missing marks end", end_line, nil)
+  end)
+end)
+
+run_test("prioritize_selected warns without visual selection", function()
+  with_buffer({ "- one" }, function()
+    vim.fn.setpos("'<", { 0, 0, 0, 0 })
+    vim.fn.setpos("'>", { 0, 0, 0, 0 })
+    tm.prioritize_selected(false)
+  end)
+end)
+
 run_test("move checked block to section bottom keeps descendants", function()
   local out = with_buffer({
     "## A",

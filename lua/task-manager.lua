@@ -41,6 +41,55 @@ function M.get_indent_level(line)
   return indent and #indent or 0
 end
 
+-- Resolve the active visual line range, even before marks are finalized.
+function M.get_visual_line_range()
+  local start_line = vim.fn.line("'<")
+  local end_line = vim.fn.line("'>")
+
+  if start_line == 0 or end_line == 0 then
+    local mode = vim.api.nvim_get_mode().mode
+    if mode:find("v") then
+      start_line = vim.fn.line("v")
+      end_line = vim.fn.line(".")
+    end
+  end
+
+  if start_line == 0 or end_line == 0 then
+    return nil
+  end
+
+  if start_line > end_line then
+    start_line, end_line = end_line, start_line
+  end
+
+  return start_line, end_line
+end
+
+local function is_ignored_triage_key(char)
+  if char == 0 then
+    return true
+  end
+
+  local ok, input = pcall(vim.fn.nr2char, char)
+  return not ok or input == "" or input == "\r" or input == "\n"
+end
+
+local function read_triage_key(prompt_fn)
+  while true do
+    if prompt_fn then
+      prompt_fn()
+    end
+
+    local char = vim.fn.getchar()
+    if char == 27 then
+      return "q"
+    end
+    if not is_ignored_triage_key(char) then
+      return vim.fn.nr2char(char)
+    end
+  end
+end
+
 -- ATX markdown heading level (1 = #, 6 = ######); nil if not a heading
 function M.get_markdown_heading_level(line)
   if not line then
@@ -93,28 +142,19 @@ function M.setup(user_config)
   local leader = vim.g.mapleader or "\\"
 
   -- Prioritize all selected lines (regardless of existing priority)
-  vim.api.nvim_set_keymap(
-    'v',
-    leader .. M.config.keybindings.prioritize_all,
-    ':<C-u>lua require("task-manager").prioritize_selected(false)<CR>',
-    { noremap = true, silent = true, desc = "Prioritize all selected todo items" }
-  )
+  vim.keymap.set("v", leader .. M.config.keybindings.prioritize_all, function()
+    M.prioritize_selected(false)
+  end, { noremap = true, silent = true, desc = "Prioritize all selected todo items" })
 
   -- Prioritize only new (unprioritized) selected lines
-  vim.api.nvim_set_keymap(
-    'v',
-    leader .. M.config.keybindings.prioritize_new,
-    ':<C-u>lua require("task-manager").prioritize_selected(true)<CR>',
-    { noremap = true, silent = true, desc = "Prioritize only new todo items" }
-  )
+  vim.keymap.set("v", leader .. M.config.keybindings.prioritize_new, function()
+    M.prioritize_selected(true)
+  end, { noremap = true, silent = true, desc = "Prioritize only new todo items" })
 
   -- Sort selected lines by priority
-  vim.api.nvim_set_keymap(
-    'v',
-    leader .. M.config.keybindings.sort_by_priority,
-    ':<C-u>lua require("task-manager").sort_by_priority()<CR>',
-    { noremap = true, silent = true, desc = "Sort todo items by priority" }
-  )
+  vim.keymap.set("v", leader .. M.config.keybindings.sort_by_priority, function()
+    M.sort_by_priority()
+  end, { noremap = true, silent = true, desc = "Sort todo items by priority" })
 
   -- Toggle checkbox in normal mode
   vim.api.nvim_set_keymap(
@@ -637,43 +677,26 @@ end
 
 -- Display a formatted table of categories and their shortcuts
 function M.display_category_shortcuts(categories)
-  -- Calculate the maximum length of category names for formatting
-  local max_length = 0
+  local parts = {}
   for _, cat in ipairs(categories) do
-    max_length = math.max(max_length, #cat.name)
+    table.insert(parts, cat.shortcut .. "=" .. cat.name)
   end
 
-  -- Build the message
-  local msg = { { "Category Shortcuts:\n", "Title" } }
-
-  -- Add headers
-  table.insert(msg, { "Key", "Special" })
-  table.insert(msg, { " | ", "Normal" })
-  table.insert(msg, { "Category", "Special" })
-  table.insert(msg, { "\n" .. string.rep("-", 15 + max_length) .. "\n", "Normal" })
-
-  -- Add each category with its shortcut
-  for _, cat in ipairs(categories) do
-    table.insert(msg, { " " .. cat.shortcut .. " ", "Question" })
-    table.insert(msg, { " | ", "Normal" })
-    table.insert(msg, { cat.name .. "\n", "Normal" })
-  end
-
-  -- Add instruction for numbers, shortcuts, skipping, and quitting
-  table.insert(msg, { "\nUse ", "Normal" })
-  table.insert(msg, { "1-9", "Question" })
-  table.insert(msg, { " for priorities, ", "Normal" })
-  table.insert(msg, { "0", "Question" })
-  table.insert(msg, { " to clear, ", "Normal" })
-  table.insert(msg, { "letter shortcuts", "Question" })
-  table.insert(msg, { " to move between categories, ", "Normal" })
-  table.insert(msg, { "s", "Question" })
-  table.insert(msg, { " to skip, or ", "Normal" })
-  table.insert(msg, { "q", "Question" })
-  table.insert(msg, { " to quit.\n", "Normal" })
-
-  -- Display the message
-  vim.api.nvim_echo(msg, true, {})
+  vim.api.nvim_echo({
+    { "Categories: ", "Title" },
+    { table.concat(parts, ", "), "Normal" },
+    { "\nKeys: ", "Normal" },
+    { "1-9", "Question" },
+    { " priority, ", "Normal" },
+    { "letters", "Question" },
+    { " move, ", "Normal" },
+    { "0", "Question" },
+    { " clear, ", "Normal" },
+    { "s", "Question" },
+    { " skip, ", "Normal" },
+    { "q", "Question" },
+    { " quit.\n", "Normal" },
+  }, false, {})
 end
 
 -- Function to toggle checkbox state in Markdown lists
@@ -1026,9 +1049,16 @@ end
 
 -- Interactive prioritization of selected lines
 function M.prioritize_selected(skip_prioritized)
-  -- Get the original visual selection range
-  local original_start_line = vim.fn.line("'<")
-  local original_end_line = vim.fn.line("'>")
+  local original_start_line, original_end_line = M.get_visual_line_range()
+  if not original_start_line then
+    vim.api.nvim_echo({
+      { "No visual selection. Select lines in visual mode first.", "WarningMsg" },
+    }, true, {})
+    return
+  end
+
+  local start_line = original_start_line
+  local end_line = original_end_line
 
   -- Get all categories
   local categories = M.get_all_categories()
@@ -1062,10 +1092,6 @@ function M.prioritize_selected(skip_prioritized)
     }, true, {})
   end
 
-  -- Get the current visual selection
-  local start_line = vim.fn.line("'<")
-  local end_line = vim.fn.line(">'")
-
   -- Determine the baseline indentation for the selection
   local selection_lines = vim.api.nvim_buf_get_lines(0, start_line - 1, end_line, true)
   local base_indent = M.get_base_indent(selection_lines)
@@ -1082,12 +1108,14 @@ function M.prioritize_selected(skip_prioritized)
     end
   end
 
-  -- Calculate total lines to process (considering skip_prioritized)
+  -- Calculate total lines that will actually be prompted
   local total_lines = 0
   for _, line_data in ipairs(lines) do
     local line = line_data.content
     local current_priority = M.get_priority(line)
-    if not (skip_prioritized and current_priority) then
+    if not M.is_category_heading(line)
+        and not M.is_sub_item(line, base_indent)
+        and not (skip_prioritized and current_priority) then
       total_lines = total_lines + 1
     end
   end
@@ -1129,13 +1157,14 @@ function M.prioritize_selected(skip_prioritized)
         -- Get the line content without priority for display
         local display_line = M.strip_task_priority(line):gsub("^%s+", "")
 
-        vim.api.nvim_echo({
-          { prompt,                "Question" },
-          { display_line, "Normal" }
-        }, true, {})
+        local function show_prompt()
+          vim.api.nvim_echo({
+            { prompt, "Question" },
+            { display_line, "Normal" },
+          }, true, {})
+        end
 
-        local char = vim.fn.getchar()
-        local input = char == 27 and "q" or vim.fn.nr2char(char)
+        local input = read_triage_key(show_prompt)
 
         -- Process input
         if input == "q" then
@@ -1144,8 +1173,7 @@ function M.prioritize_selected(skip_prioritized)
               { "You have pending changes. Apply them? (y/n): ", "Question" }
             }, true, {})
 
-            local confirm_char = vim.fn.getchar()
-            local confirm_input = confirm_char == 27 and "n" or vim.fn.nr2char(confirm_char)
+            local confirm_input = read_triage_key()
 
             if confirm_input == "y" then
               local apply_result = M._apply_prioritize_changes(changes, original_start_line, original_end_line)
@@ -1383,8 +1411,14 @@ end
 
 -- Sort selected lines by priority (stable sort within categories)
 function M.sort_by_priority()
-  local start_line = vim.fn.line("'<")
-  local end_line = vim.fn.line("'>")
+  local start_line, end_line = M.get_visual_line_range()
+  if not start_line then
+    vim.api.nvim_echo({
+      { "No visual selection. Select lines in visual mode first.", "WarningMsg" },
+    }, true, {})
+    return
+  end
+
   M.sort_line_range(start_line, end_line, { silent = false, restore_selection = true })
 end
 
