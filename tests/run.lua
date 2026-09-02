@@ -301,6 +301,36 @@ run_test("sort preserves orphan sub-items in partial selection", function()
   })
 end)
 
+run_test("sort preserves orphan sub-item position among prioritized tasks", function()
+  local out = with_buffer({
+    "## A",
+    "- [p1] parent outside",
+    "  - [p2] orphan",
+    "- [p3] low",
+    "- [p1] high",
+  }, function()
+    set_marked_range(3, 5)
+    tm.sort_by_priority()
+  end)
+
+  assert_lines("orphan_position_preserved", out, {
+    "## A",
+    "- [p1] parent outside",
+    "  - [p2] orphan",
+    "- [p1] high",
+    "- [p3] low",
+  })
+end)
+
+run_test("category shortcut 0 takes precedence over clear priority", function()
+  local used = {}
+  for c = 97, 122 do
+    used[string.char(c)] = true
+  end
+
+  assert_eq("shortcut 0 when letters exhausted", tm.generate_category_shortcut("Extra", used), "0")
+end)
+
 run_test("config deep merge and checkbox setup", function()
   reset_config()
   tm.setup({ keybindings = { prioritize_new = "t" } })
