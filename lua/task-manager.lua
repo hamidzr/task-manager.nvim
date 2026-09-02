@@ -19,6 +19,8 @@ M.config = {
   },
   -- Category heading pattern (Markdown h2)
   category_pattern = "^%s*##%s+(.+)$",
+  -- Sort selection automatically after triage changes are applied
+  auto_sort = true,
   -- Debug mode (prints additional information)
   debug = false
 }
@@ -966,6 +968,16 @@ function M._apply_prioritize_changes(changes, original_start_line, original_end_
   return true
 end
 
+function M.maybe_sort_after_prioritize(original_start_line, original_end_line)
+  if not M.config.auto_sort then
+    return
+  end
+
+  vim.fn.setpos("'<", { 0, original_start_line, 1, 0 })
+  vim.fn.setpos("'>", { 0, original_end_line, vim.fn.col("$"), 0 })
+  M.sort_by_priority()
+end
+
 -- Interactive prioritization of selected lines
 function M.prioritize_selected(skip_prioritized)
   -- Get the original visual selection range
@@ -1091,6 +1103,7 @@ function M.prioritize_selected(skip_prioritized)
 
             if confirm_input == "y" then
               M._apply_prioritize_changes(changes, original_start_line, original_end_line)
+              M.maybe_sort_after_prioritize(original_start_line, original_end_line)
               vim.api.nvim_echo({ { "Changes applied", "Normal" } }, true, {})
               return
             end
@@ -1141,6 +1154,7 @@ function M.prioritize_selected(skip_prioritized)
 
   if #changes.lines > 0 or #changes.moves > 0 then
     M._apply_prioritize_changes(changes, original_start_line, original_end_line)
+    M.maybe_sort_after_prioritize(original_start_line, original_end_line)
     vim.api.nvim_echo({ { "All changes applied", "Normal" } }, true, {})
   else
     vim.api.nvim_echo({ { "No changes made", "Normal" } }, true, {})
