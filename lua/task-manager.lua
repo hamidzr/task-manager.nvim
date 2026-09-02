@@ -1163,6 +1163,19 @@ function M.prioritize_selected(skip_prioritized)
         elseif input == "s" then
           -- Skip this item
           vim.api.nvim_echo({ { "Skipped", "Normal" } }, true, {})
+        elseif has_categories and shortcut_map[input] then
+          -- Queue category move (before 0 clear; 0 may be a category shortcut)
+          local target_category = shortcut_map[input]
+          if current_category and current_category.name ~= target_category.name then
+            table.insert(changes.moves, {
+              from = line_num,
+              target_category = target_category,
+            })
+
+            vim.api.nvim_echo({
+              { string.format("Will move to %s (priority cleared)", target_category.name), "Normal" }
+            }, true, {})
+          end
         elseif input == "0" then
           if current_priority then
             local new_line = M.strip_task_priority(line)
@@ -1182,19 +1195,6 @@ function M.prioritize_selected(skip_prioritized)
             line_num = line_num,
             content = new_line
           })
-        elseif has_categories and shortcut_map[input] then
-          -- Queue category move
-          local target_category = shortcut_map[input]
-          if current_category and current_category.name ~= target_category.name then
-            table.insert(changes.moves, {
-              from = line_num,
-              target_category = target_category,
-            })
-
-            vim.api.nvim_echo({
-              { string.format("Will move to %s (priority cleared)", target_category.name), "Normal" }
-            }, true, {})
-          end
         end
       end
     end
@@ -1265,17 +1265,13 @@ function M.sort_line_range(start_line, end_line, opts)
 
       local base_indent = M.get_base_indent(block.lines)
       local item_groups = {}
+      local fixed_lines = {}
       local i = 1
 
       while i <= #block.lines do
         local line = block.lines[i]
         if M.is_sub_item(line, base_indent) then
-          table.insert(item_groups, {
-            lines = { line },
-            original_pos = i,
-            is_checked = M.is_checked_item(line),
-            priority = M.is_list_item(line) and M.get_priority(line) or nil,
-          })
+          fixed_lines[i] = line
           i = i + 1
         else
           local block_data = M.get_task_block_lines(block.lines, i)
@@ -1330,9 +1326,28 @@ function M.sort_line_range(start_line, end_line, opts)
       end)
 
       local sorted_lines = {}
-      for _, item_group in ipairs(item_groups) do
-        for _, item_line in ipairs(item_group.lines) do
-          table.insert(sorted_lines, item_line)
+      if next(fixed_lines) then
+        local movable_lines = {}
+        for _, item_group in ipairs(item_groups) do
+          for _, item_line in ipairs(item_group.lines) do
+            table.insert(movable_lines, item_line)
+          end
+        end
+
+        local movable_idx = 1
+        for pos = 1, #block.lines do
+          if fixed_lines[pos] then
+            table.insert(sorted_lines, fixed_lines[pos])
+          else
+            table.insert(sorted_lines, movable_lines[movable_idx])
+            movable_idx = movable_idx + 1
+          end
+        end
+      else
+        for _, item_group in ipairs(item_groups) do
+          for _, item_line in ipairs(item_group.lines) do
+            table.insert(sorted_lines, item_line)
+          end
         end
       end
 
