@@ -661,6 +661,8 @@ function M.display_category_shortcuts(categories)
   table.insert(msg, { "\nUse ", "Normal" })
   table.insert(msg, { "1-9", "Question" })
   table.insert(msg, { " for priorities, ", "Normal" })
+  table.insert(msg, { "0", "Question" })
+  table.insert(msg, { " to clear, ", "Normal" })
   table.insert(msg, { "letter shortcuts", "Question" })
   table.insert(msg, { " to move between categories, ", "Normal" })
   table.insert(msg, { "s", "Question" })
@@ -994,7 +996,9 @@ function M.prioritize_selected(skip_prioritized)
       { "No categories found. You can only set priorities.\n", "WarningMsg" },
       { "Use ", "Normal" },
       { "1-9", "Question" },
-      { " for priorities or ", "Normal" },
+      { " for priorities, ", "Normal" },
+      { "0", "Question" },
+      { " to clear, or ", "Normal" },
       { "q", "Question" },
       { " to quit.\n", "Normal" }
     }, true, {})
@@ -1100,6 +1104,13 @@ function M.prioritize_selected(skip_prioritized)
         elseif input == "s" then
           -- Skip this item
           vim.api.nvim_echo({ { "Skipped", "Normal" } }, true, {})
+        elseif input == "0" then
+          local new_line = M.strip_task_priority(line)
+          table.insert(changes.lines, {
+            line_num = line_num,
+            content = new_line
+          })
+          vim.api.nvim_echo({ { "Priority cleared", "Normal" } }, true, {})
         elseif input:match("[1-9]") then
           -- Queue priority change
           local priority = tonumber(input)
@@ -1118,7 +1129,7 @@ function M.prioritize_selected(skip_prioritized)
             })
 
             vim.api.nvim_echo({
-              { string.format("Will move to %s", target_category.name), "Normal" }
+              { string.format("Will move to %s (priority cleared)", target_category.name), "Normal" }
             }, true, {})
           end
         end
