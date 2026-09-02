@@ -198,6 +198,27 @@ run_test("sort keeps descendant blocks and checked items", function()
   })
 end)
 
+run_test("sort preserves orphan sub-items in partial selection", function()
+  local out = with_buffer({
+    "## A",
+    "- [p2] parent missing from selection",
+    "- [p1] top",
+    "  - orphan child",
+    "- plain",
+  }, function()
+    set_marked_range(3, 5)
+    tm.sort_by_priority()
+  end)
+
+  assert_lines("orphan_sub_items", out, {
+    "## A",
+    "- [p2] parent missing from selection",
+    "- [p1] top",
+    "  - orphan child",
+    "- plain",
+  })
+end)
+
 run_test("config deep merge and checkbox setup", function()
   reset_config()
   tm.setup({ keybindings = { prioritize_new = "t" } })

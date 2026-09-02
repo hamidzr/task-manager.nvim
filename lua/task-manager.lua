@@ -1218,6 +1218,12 @@ function M.sort_by_priority()
       while i <= #block.lines do
         local line = block.lines[i]
         if M.is_sub_item(line, base_indent) then
+          table.insert(item_groups, {
+            lines = { line },
+            original_pos = i,
+            is_checked = M.is_checked_item(line),
+            priority = M.is_list_item(line) and M.get_priority(line) or nil,
+          })
           i = i + 1
         else
           local block_data = M.get_task_block_lines(block.lines, i)
