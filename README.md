@@ -30,7 +30,7 @@ use {
 ### Using vim-plug
 
 ```vim
-Plug 'hamidzr/task-manager'
+Plug 'hamidzr/task-manager.nvim'
 ```
 
 Then add to your init.vim or init.lua:
